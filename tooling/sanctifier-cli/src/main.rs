@@ -1,8 +1,12 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use std::fs;
+<<<<<<< HEAD
 use std::path::{Path, PathBuf};
 use sanctifier_core::{Analyzer, ArithmeticIssue, SizeWarning, UnsafePattern, PatternType, Finding};
+=======
+use sanctifier_core::{Analyzer, ArithmeticIssue, SizeWarning, UnsafePattern, PatternType, SanctifyConfig};
+>>>>>>> 374ec2e (Implemented santifier configuration system)
 
 #[derive(Parser)]
 #[command(name = "sanctifier")]
@@ -70,11 +74,28 @@ fn main() {
                 );
                 println!("{} Analyzing contract at {:?}...", "🔍".blue(), path);
             }
+<<<<<<< HEAD
 
             let mut analyzer = Analyzer::new(false);
             analyzer.ledger_limit = *limit;
 <<<<<<< HEAD
 =======
+=======
+            
+            let mut config = if Path::new(".sanctify.toml").exists() {
+                let content = fs::read_to_string(".sanctify.toml").unwrap_or_default();
+                toml::from_str(&content).unwrap_or_else(|_| SanctifyConfig::default())
+            } else {
+                SanctifyConfig::default()
+            };
+            
+            // CLI arguments override config file
+            if *limit != 64000 {
+                config.ledger_limit = *limit;
+            }
+
+            let analyzer = Analyzer::new(config);
+>>>>>>> 374ec2e (Implemented santifier configuration system)
             
             let mut all_size_warnings = Vec::new();
             let mut all_auth_gaps = Vec::new();
@@ -230,8 +251,14 @@ fn main() {
                 let json = serde_json::to_string_pretty(&findings).unwrap_or_else(|_| "[]".to_string());
                 println!("{}", json);
             } else {
+<<<<<<< HEAD
                 if all_size_warnings.is_empty() && all_unsafe_patterns.is_empty() && all_auth_gaps.is_empty() && all_panic_issues.is_empty() && all_arithmetic_issues.is_empty() {
                     println!("No issues found.");
+=======
+            if format == "text" {
+                if all_size_warnings.is_empty() {
+                    println!("No ledger size issues found.");
+>>>>>>> 374ec2e (Implemented santifier configuration system)
                 } else {
                     for warning in &all_size_warnings {
                         println!(
@@ -296,6 +323,10 @@ fn main() {
                 }
             }
         }
+<<<<<<< HEAD
+=======
+    },
+>>>>>>> 374ec2e (Implemented santifier configuration system)
         Commands::Report { output } => {
             println!("{} Generating report...", "📄".yellow());
             if let Some(p) = output {
@@ -306,7 +337,17 @@ fn main() {
         }
         Commands::Init => {
             println!("{} Initializing Sanctifier configuration...", "⚙️".cyan());
-            println!("Created .sanctify.toml");
+            let config = SanctifyConfig::default();
+            let toml = toml::to_string_pretty(&config).unwrap_or_default();
+            
+            if Path::new(".sanctify.toml").exists() {
+                println!("{} .sanctify.toml already exists, skipping.", "⚠️".yellow());
+            } else {
+                match fs::write(".sanctify.toml", toml) {
+                    Ok(_) => println!("{} Created .sanctify.toml", "✅".green()),
+                    Err(e) => eprintln!("{} Failed to create .sanctify.toml: {}", "❌".red(), e),
+                }
+            }
         }
     }
 }
@@ -386,12 +427,15 @@ fn analyze_directory(
                     for mut w in warnings {
                         w.struct_name = format!("{}: {}", path.display(), w.struct_name);
                         all_size_warnings.push(w);
+<<<<<<< HEAD
                     }
 
                     let patterns = analyzer.analyze_unsafe_patterns(&content);
                     for mut p in patterns {
                         p.snippet = format!("{}: {}", path.display(), p.snippet);
                         all_unsafe_patterns.push(p);
+=======
+>>>>>>> 374ec2e (Implemented santifier configuration system)
                     }
 
                     let gaps = analyzer.scan_auth_gaps(&content);

@@ -2,7 +2,8 @@ use soroban_sdk::Env;
 use syn::{parse_str, File, Item, Type, Fields, Meta, ExprMethodCall, Macro};
 use syn::visit::{self, Visit};
 use syn::spanned::Spanned;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
+use std::collections::HashSet;
 use thiserror::Error;
 use std::collections::HashSet;
 
@@ -64,6 +65,7 @@ pub struct ArithmeticIssue {
     pub location: String,
 }
 
+<<<<<<< HEAD
 /// Unified finding for machine-readable (JSON) output.
 #[derive(Debug, Serialize, Clone)]
 pub struct Finding {
@@ -72,6 +74,35 @@ pub struct Finding {
     pub line: usize,
     pub message: String,
 }
+=======
+// ── Configuration ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SanctifyConfig {
+    pub ignore_paths: Vec<String>,
+    pub enabled_rules: Vec<String>,
+    pub ledger_limit: usize,
+    pub strict_mode: bool,
+}
+
+impl Default for SanctifyConfig {
+    fn default() -> Self {
+        Self {
+            ignore_paths: vec!["target".to_string(), ".git".to_string()],
+            enabled_rules: vec![
+                "auth_gaps".to_string(),
+                "panics".to_string(),
+                "arithmetic".to_string(),
+                "ledger_size".to_string(),
+            ],
+            ledger_limit: 64000,
+            strict_mode: false,
+        }
+    }
+}
+
+// ── Analyzer ──────────────────────────────────────────────────────────────────
+>>>>>>> 374ec2e (Implemented santifier configuration system)
 
 // ── Analyzer ──────────────────────────────────────────────────────────────────
 =======
@@ -91,16 +122,12 @@ pub enum PatternType {
 
 >>>>>>> 079bc40 (feat: implement 'Auth Gap' detector for Soroban contracts (#21))
 pub struct Analyzer {
-    pub strict_mode: bool,
-    pub ledger_limit: usize,
+    pub config: SanctifyConfig,
 }
 
 impl Analyzer {
-    pub fn new(strict_mode: bool) -> Self {
-        Self {
-            strict_mode,
-            ledger_limit: 64000, // Default 64 KB warning threshold
-        }
+    pub fn new(config: SanctifyConfig) -> Self {
+        Self { config }
     }
     pub fn scan_auth_gaps(&self, source: &str) -> Vec<String> {
         let file = match parse_str::<File>(source) {
@@ -341,18 +368,22 @@ impl Analyzer {
             match item {
                 Item::Struct(s) => {
                     let has_contracttype = s.attrs.iter().any(|attr| {
-                        matches!(&attr.meta, Meta::Path(path) if path.is_ident("contracttype"))
+                        if let Meta::Path(path) = &attr.meta {
+                            path.is_ident("contracttype") || path.segments.iter().any(|s| s.ident == "contracttype")
+                        } else {
+                            false
+                        }
                     });
 
                     if has_contracttype {
                         let size = self.estimate_struct_size(&s);
-                        if size > self.ledger_limit
-                            || (self.strict_mode && size > self.ledger_limit / 2)
+                        if size > self.config.ledger_limit
+                            || (self.config.strict_mode && size > self.config.ledger_limit / 2)
                         {
                             warnings.push(SizeWarning {
                                 struct_name: s.ident.to_string(),
                                 estimated_size: size,
-                                limit: self.ledger_limit,
+                                limit: self.config.ledger_limit,
                             });
                         }
                     }
@@ -667,3 +698,282 @@ fn is_string_literal(expr: &syn::Expr) -> bool {
         })
     )
 }
+<<<<<<< HEAD
+=======
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_analyze_with_macros() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            use soroban_sdk::{contract, contractimpl, Env};
+
+            #[contract]
+            pub struct MyContract;
+
+            #[contractimpl]
+            impl MyContract {
+                pub fn hello(env: Env) {}
+            }
+
+            #[contracttype]
+            pub struct SmallData {
+                pub x: u32,
+            }
+
+            #[contracttype]
+            pub struct BigData {
+                pub buffer: Bytes,
+                pub large: u128,
+            }
+        "#;
+        let warnings = analyzer.analyze_ledger_size(source);
+        // SmallData: 4 bytes — BigData: 64 + 16 = 80 bytes — both under 64 KB
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_analyze_with_limit() {
+        let mut config = SanctifyConfig::default();
+        config.ledger_limit = 50;
+        let analyzer = Analyzer::new(config);
+        let source = r#"
+            #[contracttype]
+            pub struct ExceedsLimit {
+                pub buffer: Bytes, // 64 bytes estimated
+            }
+        "#;
+        let warnings = analyzer.analyze_ledger_size(source);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].struct_name, "ExceedsLimit");
+        assert_eq!(warnings[0].estimated_size, 64);
+    }
+
+    #[test]
+    fn test_complex_macro_no_panic() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            macro_rules! complex {
+                ($($t:tt)*) => { $($t)* };
+            }
+
+            complex! {
+                pub struct MyStruct {
+                    pub x: u32,
+                }
+            }
+
+            #[contractimpl]
+            impl Contract {
+                pub fn test() {
+                    let x = symbol_short!("test");
+                }
+            }
+        "#;
+        // Should not panic during parsing
+        let _ = analyzer.analyze_ledger_size(source);
+    }
+
+    #[test]
+    fn test_scan_auth_gaps() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl MyContract {
+                pub fn set_data(env: Env, val: u32) {
+                    env.storage().instance().set(&DataKey::Val, &val);
+                }
+
+                pub fn set_data_secure(env: Env, val: u32) {
+                    env.require_auth();
+                    env.storage().instance().set(&DataKey::Val, &val);
+                }
+
+                pub fn get_data(env: Env) -> u32 {
+                    env.storage().instance().get(&DataKey::Val).unwrap_or(0)
+                }
+
+                pub fn no_storage(env: Env) {
+                    let x = 1 + 1;
+                }
+            }
+        "#;
+        let gaps = analyzer.scan_auth_gaps(source);
+        assert_eq!(gaps.len(), 1);
+        assert_eq!(gaps[0], "set_data");
+    }
+
+    #[test]
+    fn test_scan_panics() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl MyContract {
+                pub fn unsafe_fn(env: Env) {
+                    panic!("Something went wrong");
+                }
+
+                pub fn unsafe_unwrap(env: Env) {
+                    let x: Option<u32> = None;
+                    let y = x.unwrap();
+                }
+
+                pub fn unsafe_expect(env: Env) {
+                    let x: Option<u32> = None;
+                    let y = x.expect("Failed to get x");
+                }
+
+                pub fn safe_fn(env: Env) -> Result<(), u32> {
+                    Ok(())
+                }
+            }
+        "#;
+        let issues = analyzer.scan_panics(source);
+        assert_eq!(issues.len(), 3);
+
+        let types: Vec<String> = issues.iter().map(|i| i.issue_type.clone()).collect();
+        assert!(types.contains(&"panic!".to_string()));
+        assert!(types.contains(&"unwrap".to_string()));
+        assert!(types.contains(&"expect".to_string()));
+    }
+
+    // ── Arithmetic overflow tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_scan_arithmetic_overflow_basic() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl MyContract {
+                pub fn add_balances(env: Env, a: u64, b: u64) -> u64 {
+                    a + b
+                }
+
+                pub fn subtract(env: Env, total: u128, amount: u128) -> u128 {
+                    total - amount
+                }
+
+                pub fn multiply(env: Env, price: u64, qty: u64) -> u64 {
+                    price * qty
+                }
+
+                pub fn safe_add(env: Env, a: u64, b: u64) -> Option<u64> {
+                    a.checked_add(b)
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        // Three distinct (function, operator) pairs flagged
+        assert_eq!(issues.len(), 3);
+
+        let ops: Vec<&str> = issues.iter().map(|i| i.operation.as_str()).collect();
+        assert!(ops.contains(&"+"));
+        assert!(ops.contains(&"-"));
+        assert!(ops.contains(&"*"));
+
+        // safe_add uses checked_add — no bare + operator, so not flagged
+        assert!(issues.iter().all(|i| i.function_name != "safe_add"));
+    }
+
+    #[test]
+    fn test_scan_arithmetic_overflow_compound_assign() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl Token {
+                pub fn accumulate(env: Env, mut balance: u64, amount: u64) -> u64 {
+                    balance += amount;
+                    balance -= 1;
+                    balance *= 2;
+                    balance
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        // One issue per compound operator per function
+        assert_eq!(issues.len(), 3);
+        let ops: Vec<&str> = issues.iter().map(|i| i.operation.as_str()).collect();
+        assert!(ops.contains(&"+="));
+        assert!(ops.contains(&"-="));
+        assert!(ops.contains(&"*="));
+    }
+
+    #[test]
+    fn test_scan_arithmetic_overflow_deduplication() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl MyContract {
+                pub fn sum_three(env: Env, a: u64, b: u64, c: u64) -> u64 {
+                    // Two `+` operations — should produce only ONE issue for this function
+                    a + b + c
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].operation, "+");
+        assert_eq!(issues[0].function_name, "sum_three");
+    }
+
+    #[test]
+    fn test_scan_arithmetic_overflow_no_false_positive_safe_code() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl MyContract {
+                pub fn compare(env: Env, a: u64, b: u64) -> bool {
+                    a > b
+                }
+
+                pub fn bitwise(env: Env, a: u32) -> u32 {
+                    a & 0xFF
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        assert!(issues.is_empty(), "Expected no issues but found: {:?}", issues);
+    }
+
+    #[test]
+    fn test_scan_arithmetic_overflow_custom_wrapper_types() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        // Custom type wrapping a primitive — arithmetic on it is still flagged
+        let source = r#"
+            #[contractimpl]
+            impl Vault {
+                pub fn add_shares(env: Env, current: Shares, delta: Shares) -> Shares {
+                    Shares(current.0 + delta.0)
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].operation, "+");
+    }
+
+    #[test]
+    fn test_scan_arithmetic_overflow_suggestion_content() {
+        let analyzer = Analyzer::new(SanctifyConfig::default());
+        let source = r#"
+            #[contractimpl]
+            impl MyContract {
+                pub fn risky(env: Env, a: u64, b: u64) -> u64 {
+                    a + b
+                }
+            }
+        "#;
+        let issues = analyzer.scan_arithmetic_overflow(source);
+        assert_eq!(issues.len(), 1);
+        // Suggestion should mention checked_add
+        assert!(issues[0].suggestion.contains("checked_add"));
+        // Location should include function name
+        assert!(issues[0].location.starts_with("risky:"));
+    }
+}
+>>>>>>> 374ec2e (Implemented santifier configuration system)

@@ -29,8 +29,8 @@ Sanctifier scans your Rust/Soroban code before deployment to detect:
 
 ### 2. Runtime Guardians
 A library of hook-based guards that you can integrate into your contracts:
-*   `Sanctifier::guard_invariant(|ctx| ...)`: Enforce state invariants.
-*   `Sanctifier::monitor_events()`: Ensure critical events are emitted.
+*   Runtime invariant checks via `SanctifiedGuard`.
+*   Step-by-step integration guide: [`docs/runtime-guards-integration.md`](docs/runtime-guards-integration.md)
 
 ### 3. Automated Deployment & Validation (NEW!)
 Deploy runtime guard wrapper contracts to Soroban testnet with continuous validation:

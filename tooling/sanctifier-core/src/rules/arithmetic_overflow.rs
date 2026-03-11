@@ -1,5 +1,5 @@
-use crate::ArithmeticIssue;
 use crate::rules::{Rule, RuleViolation, Severity};
+use crate::ArithmeticIssue;
 use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::Visit;

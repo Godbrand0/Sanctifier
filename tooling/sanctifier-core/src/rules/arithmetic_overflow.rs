@@ -1,3 +1,4 @@
+use crate::ArithmeticIssue;
 use crate::rules::{Rule, RuleViolation, Severity};
 use std::collections::HashSet;
 use syn::spanned::Spanned;
@@ -61,17 +62,12 @@ impl Rule for ArithmeticOverflowRule {
 }
 
 pub(crate) struct ArithVisitor {
-    issues: Vec<ArithmeticIssue>,
-    current_fn: Option<String>,
-    seen: HashSet<(String, String)>,
+    pub(crate) issues: Vec<ArithmeticIssue>,
+    pub(crate) current_fn: Option<String>,
+    pub(crate) seen: HashSet<(String, String)>,
 }
 
-#[derive(Debug)]
-struct ArithmeticIssue {
-    operation: String,
-    suggestion: String,
-    location: String,
-}
+// Redundant ArithmeticIssue struct removed
 
 impl ArithVisitor {
     fn classify_op(op: &syn::BinOp) -> Option<(&'static str, &'static str)> {
@@ -129,6 +125,7 @@ impl<'ast> Visit<'ast> for ArithVisitor {
                         self.seen.insert(key);
                         let line = node.left.span().start().line;
                         self.issues.push(ArithmeticIssue {
+                            function_name: fn_name.clone(),
                             operation: op_str.to_string(),
                             suggestion: suggestion.to_string(),
                             location: format!("{}:{}", fn_name, line),
@@ -149,6 +146,7 @@ impl<'ast> Visit<'ast> for ArithVisitor {
                     self.seen.insert(key);
                     let line = node.span().start().line;
                     self.issues.push(ArithmeticIssue {
+                        function_name: fn_name.clone(),
                         operation: method_name,
                         suggestion,
                         location: format!("{}:{}", fn_name, line),
@@ -170,6 +168,7 @@ impl<'ast> Visit<'ast> for ArithVisitor {
                             self.seen.insert(key);
                             let line = node.span().start().line;
                             self.issues.push(ArithmeticIssue {
+                                function_name: fn_name.clone(),
                                 operation: func_name,
                                 suggestion,
                                 location: format!("{}:{}", fn_name, line),

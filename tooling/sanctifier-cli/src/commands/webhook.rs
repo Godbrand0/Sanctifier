@@ -1,4 +1,5 @@
 use serde::Serialize;
+use tracing::warn;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanWebhookSummary {
@@ -33,14 +34,15 @@ pub fn send_scan_completed_webhooks(
         match response {
             Ok(resp) if resp.status().is_success() => {}
             Ok(resp) => {
-                eprintln!(
-                    "⚠️ Webhook delivery failed ({}): {}",
-                    resp.status().as_u16(),
-                    url
+                warn!(
+                    target: "sanctifier",
+                    status = resp.status().as_u16(),
+                    url = %url,
+                    "Webhook delivery failed"
                 );
             }
             Err(err) => {
-                eprintln!("⚠️ Webhook delivery error: {} ({})", err, url);
+                warn!(target: "sanctifier", error = %err, url = %url, "Webhook delivery error");
             }
         }
     }

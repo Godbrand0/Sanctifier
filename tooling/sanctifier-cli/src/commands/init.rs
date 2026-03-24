@@ -3,6 +3,7 @@ use colored::Colorize;
 use sanctifier_core::{CustomRule, SanctifyConfig};
 use std::fs;
 use std::path::{Path, PathBuf};
+use tracing::{error, warn};
 
 #[derive(Args, Debug)]
 pub struct InitArgs {
@@ -66,16 +67,14 @@ impl OutputFormatter {
     }
 
     pub fn display_existing_file_warning() {
-        eprintln!(
-            "{} Configuration file already exists: .sanctify.toml",
-            "⚠".yellow()
+        warn!(
+            target: "sanctifier",
+            "Configuration file already exists: .sanctify.toml. Use --force to overwrite the existing configuration"
         );
-        eprintln!("   Use --force to overwrite the existing configuration");
     }
 
     pub fn display_error(error: &anyhow::Error) {
-        eprintln!("{} Failed to create configuration file", "✗".red());
-        eprintln!("   Error: {}", error);
+        error!(target: "sanctifier", error = %error, "Failed to create configuration file");
     }
 }
 

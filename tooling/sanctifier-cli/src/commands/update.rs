@@ -1,11 +1,12 @@
 use anyhow::{anyhow, Context};
 use std::process::Command;
+use tracing::info;
 
 const PACKAGE_NAME: &str = "sanctifier-cli";
 
 pub fn exec() -> anyhow::Result<()> {
     let current = env!("CARGO_PKG_VERSION");
-    println!("Checking for Sanctifier updates (current: v{current})...");
+    info!(target: "sanctifier", version = current, "Checking for Sanctifier updates");
 
     let latest = fetch_latest_version()?;
     if !is_newer_version(current, &latest) {
@@ -13,7 +14,12 @@ pub fn exec() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    println!("Updating Sanctifier from v{current} to v{latest}...");
+    info!(
+        target: "sanctifier",
+        current_version = current,
+        latest_version = latest,
+        "Updating Sanctifier"
+    );
     install_version(&latest)?;
     println!("Update complete. Sanctifier is now at version v{latest}.");
     Ok(())

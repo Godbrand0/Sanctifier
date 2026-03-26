@@ -195,7 +195,7 @@ mod tests {
         let mut server = Server::new();
         let mock = server
             .mock("POST", "/discord")
-.match_query(Matcher::Any)
+            .match_query(Matcher::Any)
             .match_body(Matcher::Json(expected_body))
             .with_status(204)
             .create();
@@ -253,7 +253,7 @@ mod tests {
         let mut server = Server::new();
         let mock = server
             .mock("POST", "/slack")
-.match_query(Matcher::Any)
+            .match_query(Matcher::Any)
             .match_body(Matcher::Json(expected_body))
             .with_status(200)
             .create();

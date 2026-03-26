@@ -327,12 +327,7 @@ fn render_markdown(data: &ReportData, path: &Path, vuln_db_version: &str) -> Str
             data.sep41_issues.len(),
             "🟡 Medium",
         ),
-        (
-            "Vuln DB Matches",
-            "—",
-            data.vuln_matches.len(),
-            "varies",
-        ),
+        ("Vuln DB Matches", "—", data.vuln_matches.len(), "varies"),
         (
             "Analysis Timeouts",
             "S000",
@@ -352,7 +347,9 @@ fn render_markdown(data: &ReportData, path: &Path, vuln_db_version: &str) -> Str
 
     if !data.auth_gaps.is_empty() {
         md.push_str("### 🔴 Authentication Gaps (S001)\n\n");
-        md.push_str("> Missing `require_auth()` in state-mutating or externally-callable functions.\n\n");
+        md.push_str(
+            "> Missing `require_auth()` in state-mutating or externally-callable functions.\n\n",
+        );
         for g in &data.auth_gaps {
             md.push_str(&format!("- `{}`\n", g));
         }
@@ -361,7 +358,9 @@ fn render_markdown(data: &ReportData, path: &Path, vuln_db_version: &str) -> Str
 
     if !data.panic_issues.is_empty() {
         md.push_str("### 🔴 Panic / Unwrap / Expect (S002)\n\n");
-        md.push_str("> `panic!`, `.unwrap()`, or `.expect()` may abort the contract execution.\n\n");
+        md.push_str(
+            "> `panic!`, `.unwrap()`, or `.expect()` may abort the contract execution.\n\n",
+        );
         md.push_str("| Function | Type | Location |\n|---|---|---|\n");
         for p in &data.panic_issues {
             md.push_str(&format!(
@@ -387,7 +386,9 @@ fn render_markdown(data: &ReportData, path: &Path, vuln_db_version: &str) -> Str
 
     if !data.size_warnings.is_empty() {
         md.push_str("### 🟡 Ledger Size Risk (S004)\n\n");
-        md.push_str("> Structs that approach or exceed the ledger entry limit will fail to persist.\n\n");
+        md.push_str(
+            "> Structs that approach or exceed the ledger entry limit will fail to persist.\n\n",
+        );
         md.push_str("| Struct | Estimated Size | Limit | Level |\n|---|---|---|---|\n");
         for w in &data.size_warnings {
             let level = format!("{:?}", w.level);
@@ -419,7 +420,9 @@ fn render_markdown(data: &ReportData, path: &Path, vuln_db_version: &str) -> Str
             let pat = format!("{:?}", p.pattern_type);
             md.push_str(&format!(
                 "| {} | {} | `{}` |\n",
-                pat, p.line, p.snippet.replace('|', "\\|")
+                pat,
+                p.line,
+                p.snippet.replace('|', "\\|")
             ));
         }
         md.push('\n');
@@ -453,13 +456,12 @@ fn render_markdown(data: &ReportData, path: &Path, vuln_db_version: &str) -> Str
 
     if !data.upgrade_findings.is_empty() {
         md.push_str("### 🟠 Upgrade / Admin Risks (S010)\n\n");
-        md.push_str("| Category | Function | Location | Message | Suggestion |\n|---|---|---|---|---|\n");
+        md.push_str(
+            "| Category | Function | Location | Message | Suggestion |\n|---|---|---|---|---|\n",
+        );
         for f in &data.upgrade_findings {
             let cat = format!("{:?}", f.category);
-            let func = f
-                .function_name
-                .as_deref()
-                .unwrap_or("—");
+            let func = f.function_name.as_deref().unwrap_or("—");
             md.push_str(&format!(
                 "| {} | `{}` | `{}` | {} | {} |\n",
                 cat, func, f.location, f.message, f.suggestion
@@ -496,11 +498,18 @@ fn render_markdown(data: &ReportData, path: &Path, vuln_db_version: &str) -> Str
 
     if !data.vuln_matches.is_empty() {
         md.push_str("### 🛡️ Vulnerability Database Matches\n\n");
-        md.push_str("| ID | Name | Severity | File | Line | Description |\n|---|---|---|---|---|---|\n");
+        md.push_str(
+            "| ID | Name | Severity | File | Line | Description |\n|---|---|---|---|---|---|\n",
+        );
         for m in &data.vuln_matches {
             md.push_str(&format!(
                 "| `{}` | {} | {} | `{}` | {} | {} |\n",
-                m.vuln_id, m.name, m.severity.to_uppercase(), m.file, m.line, m.description
+                m.vuln_id,
+                m.name,
+                m.severity.to_uppercase(),
+                m.file,
+                m.line,
+                m.description
             ));
         }
         md.push('\n');
@@ -562,19 +571,69 @@ fn render_html(data: &ReportData, path: &Path, vuln_db_version: &str) -> String 
 
     // Build summary rows
     let rows: &[(&str, &str, usize, &str)] = &[
-        ("Authentication Gaps", "S001", data.auth_gaps.len(), "critical"),
-        ("Panic / Unwrap / Expect", "S002", data.panic_issues.len(), "high"),
-        ("Arithmetic Overflow", "S003", data.arithmetic_issues.len(), "high"),
-        ("Ledger Size Risk", "S004", data.size_warnings.len(), "medium"),
+        (
+            "Authentication Gaps",
+            "S001",
+            data.auth_gaps.len(),
+            "critical",
+        ),
+        (
+            "Panic / Unwrap / Expect",
+            "S002",
+            data.panic_issues.len(),
+            "high",
+        ),
+        (
+            "Arithmetic Overflow",
+            "S003",
+            data.arithmetic_issues.len(),
+            "high",
+        ),
+        (
+            "Ledger Size Risk",
+            "S004",
+            data.size_warnings.len(),
+            "medium",
+        ),
         ("Storage Collisions", "S005", data.collisions.len(), "high"),
-        ("Unsafe Patterns", "S006", data.unsafe_patterns.len(), "medium"),
-        ("Event Inconsistencies", "S008", data.event_issues.len(), "low"),
-        ("Unhandled Results", "S009", data.unhandled_results.len(), "high"),
+        (
+            "Unsafe Patterns",
+            "S006",
+            data.unsafe_patterns.len(),
+            "medium",
+        ),
+        (
+            "Event Inconsistencies",
+            "S008",
+            data.event_issues.len(),
+            "low",
+        ),
+        (
+            "Unhandled Results",
+            "S009",
+            data.unhandled_results.len(),
+            "high",
+        ),
         ("Upgrade Risks", "S010", data.upgrade_findings.len(), "high"),
-        ("SMT Invariant Violations", "S011", data.smt_issues.len(), "critical"),
-        ("SEP-41 Deviations", "S012", data.sep41_issues.len(), "medium"),
+        (
+            "SMT Invariant Violations",
+            "S011",
+            data.smt_issues.len(),
+            "critical",
+        ),
+        (
+            "SEP-41 Deviations",
+            "S012",
+            data.sep41_issues.len(),
+            "medium",
+        ),
         ("Vuln DB Matches", "—", data.vuln_matches.len(), "high"),
-        ("Analysis Timeouts", "S000", data.timed_out_files.len(), "info"),
+        (
+            "Analysis Timeouts",
+            "S000",
+            data.timed_out_files.len(),
+            "info",
+        ),
     ];
 
     let total: usize = rows.iter().map(|r| r.2).sum();

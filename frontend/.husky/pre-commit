@@ -20,7 +20,16 @@ cargo fmt --all -- --check
 BACKEND_STATUS=$?
 
 if [ $BACKEND_STATUS -ne 0 ]; then
-  echo "Backend formatting failed. Please run 'cargo fmt' before committing."
+  echo "Backend formatting failed. Please run 'cargo fmt --all' before committing."
+  exit 1
+fi
+
+echo "Running backend linting (cargo clippy)..."
+cargo clippy --workspace -- -D warnings
+CLIPPY_STATUS=$?
+
+if [ $CLIPPY_STATUS -ne 0 ]; then
+  echo "Backend clippy checks failed. Please fix lint issues before committing."
   exit 1
 fi
 

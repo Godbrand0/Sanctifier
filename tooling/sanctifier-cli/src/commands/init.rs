@@ -294,7 +294,10 @@ mod tests {
     #[test]
     fn test_exec_creates_config_in_temp_dir() {
         let temp_dir = TempDir::new().unwrap();
-        let args = InitArgs { path: temp_dir.path().to_path_buf(), force: false };
+        let args = InitArgs {
+            path: temp_dir.path().to_path_buf(),
+            force: false,
+        };
 
         // Execute init command
         let result = exec(args, Some(temp_dir.path().to_path_buf()));
@@ -320,7 +323,10 @@ mod tests {
         // Create existing file
         fs::write(&config_path, "existing content").unwrap();
 
-        let args = InitArgs { path: temp_dir.path().to_path_buf(), force: false };
+        let args = InitArgs {
+            path: temp_dir.path().to_path_buf(),
+            force: false,
+        };
 
         // Change to temp directory
         let original_dir = std::env::current_dir().unwrap();
@@ -346,7 +352,10 @@ mod tests {
         // Create existing file
         fs::write(&config_path, "existing content").unwrap();
 
-        let args = InitArgs { path: temp_dir.path().to_path_buf(), force: true };
+        let args = InitArgs {
+            path: temp_dir.path().to_path_buf(),
+            force: true,
+        };
 
         // Execute init command
         let result = exec(args, Some(temp_dir.path().to_path_buf()));

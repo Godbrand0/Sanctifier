@@ -10,6 +10,7 @@ export function NavBar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const navLinks = [
+    { name: "Scan", href: "/scan" },
     { name: "Dashboard", href: "/dashboard" },
     { name: "Terminal", href: "/terminal" },
   ];

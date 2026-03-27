@@ -69,20 +69,18 @@ jobs:
           cargo test -p sanctifier-core --all-features
           cargo test -p sanctifier-cli
 
-      - name: Install tarpaulin (Linux only)
+      - name: Code coverage (Linux only)
         if: runner.os == 'Linux'
-        run: cargo install cargo-tarpaulin || true
-
-      - name: Generate Coverage Report (Linux only)
-        if: runner.os == 'Linux'
-        run: cargo tarpaulin -p sanctifier-core --out Xml
+        run: |
+          cargo install cargo-tarpaulin --locked --quiet
+          cargo tarpaulin --workspace --out Xml --output-dir coverage/
 
       - name: Upload coverage to Codecov (Linux only)
         if: runner.os == 'Linux'
-        uses: codecov/codecov-action@0f8570b1a125f4937846a11fcfa3bcd548bd8c97 # v4.6.0
+        uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: cobertura.xml
+          files: coverage/cobertura.xml
           fail_ci_if_error: false
           slug: HyperSafeD/Sanctifier
 

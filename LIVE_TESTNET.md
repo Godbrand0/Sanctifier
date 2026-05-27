@@ -3,6 +3,8 @@
 > Sanctifier's example contracts are deployed and operational on **Stellar Soroban Testnet**.
 > Anyone can verify the deployment, query state, and inspect on-chain audit events.
 
+📹 **New to Sanctifier?** Follow the [Live-Testnet Video Walkthrough Script](docs/VIDEO_WALKTHROUGH_SCRIPT.md) — a timestamped storyboard covering health checks, stats, live audit events, and on-chain verification (~8 min).
+
 ---
 
 ## Deployed Contract Addresses

@@ -32,6 +32,7 @@ This directory contains fixture source files used as deterministic scan inputs f
 | `S019` | `s019_unchecked_calls.rs` |
 | `S020` | `s020_missing_events.rs` |
 | `S021` | `s021_storage_misuse.rs` |
+| `S022` | `s022_raw_invoke_contract.rs` |
 
 ## Usage
 

@@ -94,7 +94,7 @@ fn add_suppression(
     entry.insert("line", Value::from(line as i64));
     entry.insert("reason", Value::from(reason.to_owned()));
 
-    code_array.push(entry);
+    code_array.push(toml_edit::Value::InlineTable(entry));
 
     // Write back
     fs::write(config_path, doc.to_string())

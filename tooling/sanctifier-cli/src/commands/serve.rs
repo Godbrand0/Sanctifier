@@ -1,5 +1,10 @@
 use anyhow::{Context, Result};
 use clap::Args;
+use sanctifier_core::rules::RuleRegistry;
+use sanctifier_core::SanctifyConfig;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use warp::{Filter, Rejection, Reply};
 use sanctifier_core::analysis_cache::AnalysisCache;
 use sanctifier_core::Analyzer;
 use std::net::SocketAddr;
@@ -21,6 +26,7 @@ pub struct ServeArgs {
 
 #[derive(Clone)]
 struct AppState {
+    registry: Arc<RuleRegistry>,
     analyzer: Arc<Analyzer>,
     cache: Arc<Mutex<AnalysisCache<serde_json::Value>>>,
 }
@@ -31,6 +37,8 @@ pub fn exec(args: ServeArgs) -> Result<()> {
 }
 
 async fn serve_async(args: ServeArgs) -> Result<()> {
+    let registry = Arc::new(RuleRegistry::with_default_rules());
+    let state = AppState { registry };
     let config = sanctifier_core::SanctifyConfig::default();
     let analyzer = Arc::new(Analyzer::new(config));
     let cache = Arc::new(Mutex::new(AnalysisCache::new(100)));
@@ -41,15 +49,15 @@ async fn serve_async(args: ServeArgs) -> Result<()> {
         .parse()
         .context("Invalid bind address")?;
 
-    println!("🚀 Sanctifier HTTP server starting on http://{}", addr);
-    println!("   POST /analyze - Analyze contract source");
-    println!("   GET /health - Health check");
-    println!();
+    println!("Sanctifier HTTP server starting on http://{}", addr);
+    println!("   POST /analyze (body: raw Rust source) — returns NDJSON findings");
+    println!("   GET  /health");
 
     let state_filter = warp::any().map(move || state.clone());
 
     let analyze_route = warp::post()
         .and(warp::path("analyze"))
+        .and(warp::body::bytes())
         .and(warp::body::json())
         .and(state_filter.clone())
         .and_then(handle_analyze);

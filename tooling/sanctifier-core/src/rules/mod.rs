@@ -31,6 +31,8 @@ pub mod unhandled_result;
 pub mod unsafe_prng;
 /// Unused local variables.
 pub mod unused_variable;
+/// Direct xdr::ScVal raw construction detection.
+pub mod xdr_raw_construction;
 
 /// Variable shadowing in nested scopes.
 pub mod variable_shadowing;
@@ -198,6 +200,7 @@ impl RuleRegistry {
         registry.register(unhandled_result::UnhandledResultRule::new());
         registry.register(unused_variable::UnusedVariableRule::new());
         registry.register(shadow_storage::ShadowStorageRule::new());
+        registry.register(xdr_raw_construction::XdrRawConstructionRule::new());
         registry.register(storage_update_state_check::StorageUpdateStateCheckRule::new());
         registry.register(reentrancy::ReentrancyRule::new());
         registry.register(truncation_bounds::TruncationBoundsRule::new());

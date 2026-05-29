@@ -42,6 +42,12 @@ pub mod raw_invoke_contract;
 pub mod shallow_test;
 /// transfer_from-style flows that consume 'from' balance without allowance checks.
 pub mod transfer_from_no_allowance;
+/// Persistent/Temporary storage writes without a TTL bump (extend_ttl).
+pub mod missing_ttl_bump;
+/// Taint propagation through tuple and struct destructures.
+pub mod taint_propagation;
+/// Static reentrancy — external call before state write (complement to runtime guard).
+pub mod static_reentrancy;
 use serde::Serialize;
 use std::any::Any;
 
@@ -195,6 +201,20 @@ impl RuleRegistry {
         registry.register(unused_variable::UnusedVariableRule::new());
         registry.register(shadow_storage::ShadowStorageRule::new());
         registry.register(xdr_raw_construction::XdrRawConstructionRule::new());
+        registry.register(storage_update_state_check::StorageUpdateStateCheckRule::new());
+        registry.register(reentrancy::ReentrancyRule::new());
+        registry.register(truncation_bounds::TruncationBoundsRule::new());
+        registry.register(unsafe_prng::UnsafePrngRule::new());
+        registry.register(variable_shadowing::VariableShadowingRule::new());
+        registry.register(unchecked_external_call::UncheckedExternalCallRule::new());
+        registry.register(missing_state_event::MissingStateEventRule::new());
+        registry.register(instance_storage_misuse::InstanceStorageMisuseRule::new());
+        registry.register(raw_invoke_contract::RawInvokeContractRule::new());
+        registry.register(shallow_test::ShallowTestRule::new());
+        registry.register(transfer_from_no_allowance::TransferFromNoAllowanceRule::new());
+        registry.register(missing_ttl_bump::MissingTtlBumpRule::new());
+        registry.register(taint_propagation::TaintPropagationRule::new());
+        registry.register(static_reentrancy::StaticReentrancyRule::new());
         registry
     }
 }

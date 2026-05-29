@@ -3,9 +3,9 @@ pub mod badge;
 pub mod benchmark;
 pub mod complexity;
 pub mod diff;
+pub mod explain;
 pub mod fix;
 pub mod gas;
-
 pub mod init;
 pub mod reentrancy;
 pub mod report;
@@ -13,6 +13,7 @@ pub mod serve;
 pub mod storage;
 pub mod suppress;
 pub mod update;
+pub mod upgrade;
 pub mod verify;
 pub mod watch;
 pub mod webhook;

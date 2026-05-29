@@ -414,4 +414,18 @@ mod tests {
             "index subscript arithmetic must be skipped"
         );
     }
+    #[test]
+    fn test_flag_division_by_variable() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn transfer(a: u64, b: u64) {
+                let c = a / b;
+                let d = a % b;
+            }
+        "#;
+        let violations = rule.check(source);
+        // Expect two violations: division and remainder with non‑constant divisor
+        assert_eq!(violations.len(), 2, "Division and remainder with variable divisor should be flagged");
+    }
 }
+

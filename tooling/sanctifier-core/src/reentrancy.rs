@@ -282,14 +282,6 @@ fn is_storage_mutation(method: &str, receiver: &syn::Expr) -> bool {
         || receiver_str.contains("instance")
 }
 
-    let mut visitor = CallVisitor {
-        edges: Vec::new(),
-        current_fn: String::new(),
-    };
-    visitor.visit_file(&file);
-    visitor.edges
-}
-
 fn count_invoke_contract_calls(block: &syn::Block) -> usize {
     let mut count = 0;
     count_in_block(block, &mut count);
@@ -397,28 +389,6 @@ fn build_guard_patch(block: &syn::Block, fn_name: &str) -> Option<Patch> {
         }
     }
     None
-}
-
-    fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
-        if node.method == "invoke_contract" || node.method == "call" {
-            self.edges.push(ReentrancyEdge {
-                caller_function: self.current_fn.clone(),
-                target_contract: "Unknown".to_string(), // Placeholder
-                target_function: "Unknown".to_string(), // Placeholder
-                function_expr: Some(quote!(#node).to_string()),
-            });
-        }
-        syn::Expr::Block(b) => b.block.stmts.iter().any(|s| match s {
-            syn::Stmt::Expr(e, _) => contains_invoke_contract(e),
-            syn::Stmt::Local(l) => l
-                .init
-                .as_ref()
-                .map(|i| contains_invoke_contract(&i.expr))
-                .unwrap_or(false),
-            _ => false,
-        }),
-        _ => false,
-    }
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────

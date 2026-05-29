@@ -16,6 +16,10 @@ pub mod vulndb;
 #[command(name = "sanctifier")]
 #[command(version, about = "Stellar Soroban Security & Formal Verification Suite", long_about = None)]
 struct Cli {
+    /// Disable coloured output (also respects NO_COLOR env var)
+    #[arg(long, global = true)]
+    no_color: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -99,6 +103,7 @@ fn run() -> anyhow::Result<()> {
         _ => logging::LogOutput::Text,
     };
     logging::init(log_output)?;
+    commands::color::init(cli.no_color);
 
     match cli.command {
         Commands::Analyze(args) => commands::analyze::exec(args)?,

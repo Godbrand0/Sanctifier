@@ -3,7 +3,7 @@ use crate::commands::webhook::{
 };
 use crate::vulndb::{VulnDatabase, VulnMatch};
 use clap::{Args, ValueEnum};
-use colored::*;
+use crate::commands::color as c;
 use rayon::prelude::*;
 use sanctifier_core::finding_codes;
 use sanctifier_core::{Analyzer, SanctifyConfig};
@@ -89,7 +89,7 @@ pub struct AnalyzeArgs {
     /// Path to the contract directory or Cargo.toml
     #[arg(default_value = ".")]
     pub path: PathBuf,
-    /// Output format (text, json)
+    /// Output format (text, json, sarif)
     #[arg(short, long, default_value = "text")]
     pub format: String,
     /// Limit for ledger entry size in bytes
@@ -172,11 +172,12 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
     let path = path_raw;
 
     let is_json = args.format == "json";
+    let is_sarif = args.format == "sarif";
     let timeout_secs = args.timeout;
     let start = Instant::now();
 
     if !is_soroban_project(&path) {
-        if is_json {
+    if is_json {
             let err = serde_json::json!({
                 "error": format!("{:?} is not a valid Soroban project", path),
                 "success": false,
@@ -239,7 +240,7 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
         .map(|file_path| {
             let idx = counter.fetch_add(1, Ordering::Relaxed) + 1;
             let file_name = file_path.display().to_string();
-            if !is_json {
+            if !is_json && !is_sarif {
                 eprintln!("[{}/{}] Analyzing {}", idx, total_files, file_name);
             }
             let content = match fs::read_to_string(file_path) {
@@ -528,40 +529,40 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
     if let Some(profile) = args.profile {
         println!(
             "{} Profile: {} — {}",
-            "ℹ".blue(),
-            profile.as_str().bold(),
+            c::blue("ℹ"),
+            c::bold(profile.as_str()),
             profile.description()
         );
     }
     if !timed_out_files.is_empty() {
         println!(
             "\n{} {} file(s) timed out ({}s limit):",
-            "⏱️".yellow(),
+            c::yellow("⏱️"),
             timed_out_files.len(),
             timeout_secs
         );
         for f in &timed_out_files {
             println!(
                 "   {} [{}] {}",
-                "->".red(),
-                finding_codes::ANALYSIS_TIMEOUT.bold(),
+                c::red("->"),
+                c::bold(finding_codes::ANALYSIS_TIMEOUT),
                 f
             );
         }
     }
     if collisions.is_empty() {
-        println!("\n{} No storage key collisions found.", "✅".green());
+        println!("\n{} No storage key collisions found.", c::green("✅"));
     } else {
         println!(
             "\n{} Found potential Storage Key Collisions!",
-            "⚠️".yellow()
+            c::yellow("⚠️")
         );
         for c in &collisions {
             println!(
                 "   {} [{}] Value: {}",
-                "->".red(),
-                finding_codes::STORAGE_COLLISION.bold(),
-                c.key_value.bold()
+                c::red("->"),
+                c::bold(finding_codes::STORAGE_COLLISION),
+                c::bold(&c.key_value)
             );
             println!("      Type: {}", c.key_type);
             println!("      Location: {}", c.location);
@@ -569,42 +570,42 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
         }
     }
     if auth_gaps.is_empty() {
-        println!("{} No authentication gaps found.", "✅".green());
+        println!("{} No authentication gaps found.", c::green("✅"));
     } else {
-        println!("\n{} Found potential Authentication Gaps!", "⚠️".yellow());
+        println!("\n{} Found potential Authentication Gaps!", c::yellow("⚠️"));
         for gap in &auth_gaps {
             println!(
                 "   {} [{}] Function: {}",
-                "->".red(),
-                finding_codes::AUTH_GAP.bold(),
-                gap.function_name.bold()
+                c::red("->"),
+                c::bold(finding_codes::AUTH_GAP),
+                c::bold(&gap.function_name)
             );
         }
     }
     if panic_issues.is_empty() {
-        println!("{} No explicit Panics/Unwraps found.", "✅".green());
+        println!("{} No explicit Panics/Unwraps found.", c::green("✅"));
     } else {
-        println!("\n{} Found explicit Panics/Unwraps!", "⚠️".yellow());
+        println!("\n{} Found explicit Panics/Unwraps!", c::yellow("⚠️"));
         for issue in &panic_issues {
             println!(
                 "   {} [{}] Type: {}",
-                "->".red(),
-                finding_codes::PANIC_USAGE.bold(),
-                issue.issue_type.bold()
+                c::red("->"),
+                c::bold(finding_codes::PANIC_USAGE),
+                c::bold(&issue.issue_type)
             );
             println!("      Location: {}", issue.location);
         }
     }
     if arithmetic_issues.is_empty() {
-        println!("{} No unchecked Arithmetic Operations found.", "✅".green());
+        println!("{} No unchecked Arithmetic Operations found.", c::green("✅"));
     } else {
-        println!("\n{} Found unchecked Arithmetic Operations!", "⚠️".yellow());
+        println!("\n{} Found unchecked Arithmetic Operations!", c::yellow("⚠️"));
         for issue in &arithmetic_issues {
             println!(
                 "   {} [{}] Op: {}",
-                "->".red(),
-                finding_codes::ARITHMETIC_OVERFLOW.bold(),
-                issue.operation.bold()
+                c::red("->"),
+                c::bold(finding_codes::ARITHMETIC_OVERFLOW),
+                c::bold(&issue.operation)
             );
             println!("      Location: {}", issue.location);
         }
@@ -612,32 +613,32 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
     if truncation_bounds_issues.is_empty() {
         println!(
             "{} No integer truncation or unchecked indexing found.",
-            "✅".green()
+            c::green("✅")
         );
     } else {
-        println!("\n{} Found Truncation / Bounds Risk issues!", "⚠️".yellow());
+        println!("\n{} Found Truncation / Bounds Risk issues!", c::yellow("⚠️"));
         for issue in &truncation_bounds_issues {
             println!(
                 "   {} [{}] Kind: {} | Expr: {}",
-                "->".red(),
-                finding_codes::TRUNCATION_BOUNDS.bold(),
-                issue.kind.bold(),
-                issue.expression.bold()
+                c::red("->"),
+                c::bold(finding_codes::TRUNCATION_BOUNDS),
+                c::bold(&issue.kind),
+                c::bold(&issue.expression)
             );
             println!("      Location: {}", issue.location);
             println!("      Suggestion: {}", issue.suggestion);
         }
     }
     if size_warnings.is_empty() {
-        println!("{} No ledger size issues found.", "✅".green());
+        println!("{} No ledger size issues found.", c::green("✅"));
     } else {
-        println!("\n{} Found Ledger Size Warnings!", "⚠️".yellow());
+        println!("\n{} Found Ledger Size Warnings!", c::yellow("⚠️"));
         for w in &size_warnings {
             println!(
                 "   {} [{}] Struct: {}",
-                "->".red(),
-                finding_codes::LEDGER_SIZE_RISK.bold(),
-                w.struct_name.bold()
+                c::red("->"),
+                c::bold(finding_codes::LEDGER_SIZE_RISK),
+                c::bold(&w.struct_name)
             );
             println!("      Size: {} bytes", w.estimated_size);
         }
@@ -645,14 +646,14 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
     if !event_issues.is_empty() {
         println!(
             "\n{} Found Event Consistency/Optimization issues!",
-            "⚠️".yellow()
+            c::yellow("⚠️")
         );
         for issue in &event_issues {
             println!(
                 "   {} [{}] Event: {}",
-                "->".red(),
-                finding_codes::EVENT_INCONSISTENCY.bold(),
-                issue.event_name.bold()
+                c::red("->"),
+                c::bold(finding_codes::EVENT_INCONSISTENCY),
+                c::bold(&issue.event_name)
             );
             println!("      Type: {:?}", issue.issue_type);
             println!("      Location: {}", issue.location);
@@ -660,13 +661,13 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
         }
     }
     if !unhandled_results.is_empty() {
-        println!("\n{} Found Unhandled Result issues!", "⚠️".yellow());
+        println!("\n{} Found Unhandled Result issues!", c::yellow("⚠️"));
         for issue in &unhandled_results {
             println!(
                 "   {} [{}] Function: {}",
-                "->".red(),
-                finding_codes::UNHANDLED_RESULT.bold(),
-                issue.function_name.bold()
+                c::red("->"),
+                c::bold(finding_codes::UNHANDLED_RESULT),
+                c::bold(&issue.function_name)
             );
             println!("      Call: {}", issue.call_expression);
             println!("      Location: {}", issue.location);
@@ -674,11 +675,11 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
         }
     }
     if variable_shadowing_violations.is_empty() {
-        println!("{} No variable shadowing detected.", "✅".green());
+        println!("{} No variable shadowing detected.", c::green("✅"));
     } else {
-        println!("\n{} Found Variable Shadowing issues!", "⚠️".yellow());
+        println!("\n{} Found Variable Shadowing issues!", c::yellow("⚠️"));
         for violation in &variable_shadowing_violations {
-            println!("   {} [S006] {}", "->".red(), violation.message.bold());
+            println!("   {} [S006] {}", c::red("->"), c::bold(&violation.message));
             println!("      Location: {}", violation.location);
             if let Some(suggestion) = &violation.suggestion {
                 println!("      Suggestion: {}", suggestion);
@@ -687,13 +688,13 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
     }
     let total_upgrade_findings: usize = upgrade_reports.iter().map(|r| r.findings.len()).sum();
     if total_upgrade_findings > 0 {
-        println!("\n{} Found Upgrade/Admin Risk issues!", "⚠️".yellow());
+        println!("\n{} Found Upgrade/Admin Risk issues!", c::yellow("⚠️"));
         for report in &upgrade_reports {
             for finding in &report.findings {
                 println!(
                     "   {} [{}] Category: {:?}",
-                    "->".red(),
-                    finding_codes::UPGRADE_RISK.bold(),
+                    c::red("->"),
+                    c::bold(finding_codes::UPGRADE_RISK),
                     finding.category
                 );
                 if let Some(f_name) = &finding.function_name {
@@ -706,28 +707,28 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
         }
     }
     if !smt_issues.is_empty() {
-        println!("\n{} Found Formal Verification (SMT) issues!", "❌".red());
+        println!("\n{} Found Formal Verification (SMT) issues!", c::red("❌"));
         for issue in &smt_issues {
             println!(
                 "   {} [{}] Function: {}",
-                "->".red(),
-                finding_codes::SMT_INVARIANT_VIOLATION.bold(),
-                issue.function_name.bold()
+                c::red("->"),
+                c::bold(finding_codes::SMT_INVARIANT_VIOLATION),
+                c::bold(&issue.function_name)
             );
             println!("      Description: {}", issue.description);
             println!("      Location: {}", issue.location);
         }
     }
     if !sep41_checked_contracts.is_empty() && sep41_issues.is_empty() {
-        println!("{} SEP-41 token interface verified exactly.", "✅".green());
+        println!("{} SEP-41 token interface verified exactly.", c::green("✅"));
     } else if !sep41_issues.is_empty() {
-        println!("\n{} Found SEP-41 Interface Deviations!", "⚠️".yellow());
+        println!("\n{} Found SEP-41 Interface Deviations!", c::yellow("⚠️"));
         for issue in &sep41_issues {
             println!(
                 "   {} [{}] Function: {}",
-                "->".red(),
-                finding_codes::SEP41_INTERFACE_DEVIATION.bold(),
-                issue.function_name.bold()
+                c::red("->"),
+                c::bold(finding_codes::SEP41_INTERFACE_DEVIATION),
+                c::bold(&issue.function_name)
             );
             println!("      Kind: {:?}", issue.kind);
             println!("      Location: {}", issue.location);
@@ -739,13 +740,13 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
         }
     }
     if !contractimport_issues.is_empty() {
-        println!("\n{} Found ContractImport Mismatches!", "⚠️".yellow());
+        println!("\n{} Found ContractImport Mismatches!", c::yellow("⚠️"));
         for issue in &contractimport_issues {
             println!(
                 "   {} [{}] WASM: {}",
-                "->".red(),
-                finding_codes::CONTRACTIMPORT_MISMATCH.bold(),
-                issue.wasm_path.bold()
+                c::red("->"),
+                c::bold(finding_codes::CONTRACTIMPORT_MISMATCH),
+                c::bold(&issue.wasm_path)
             );
             println!("      Location: {}", issue.location);
             println!("      Message: {}", issue.message);
@@ -754,28 +755,28 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
     if vuln_matches.is_empty() {
         println!(
             "{} No known vulnerability patterns matched (DB v{}).",
-            "✅".green(),
+            c::green("✅"),
             vuln_db.version
         );
     } else {
         println!(
             "\n{} Found {} known vulnerability pattern(s) (DB v{})!",
-            "🛡️".red(),
+            c::red("🛡️"),
             vuln_matches.len(),
             vuln_db.version
         );
         for m in &vuln_matches {
             let sev_icon = match m.severity.as_str() {
-                "critical" => "❌".red(),
-                "high" => "🔴".red(),
-                "medium" => "⚠️".yellow(),
-                _ => "ℹ️".blue(),
+                "critical" => c::red("❌"),
+                "high" => c::red("🔴"),
+                "medium" => c::yellow("⚠️"),
+                _ => c::blue("ℹ️"),
             };
             println!(
                 "   {} [{}] {} ({})",
                 sev_icon,
-                m.vuln_id.bold(),
-                m.name.bold(),
+                c::bold(&m.vuln_id),
+                c::bold(&m.name),
                 m.severity.to_uppercase()
             );
             println!("      File: {}:{}", m.file, m.line);
@@ -788,11 +789,70 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
 
     let cached_count = cached_counter.load(Ordering::Relaxed);
     let reanalysed_count = total_files - cached_count;
+
+    if is_sarif {
+        let mut sarif_results: Vec<serde_json::Value> = Vec::new();
+        for gap in &auth_gaps {
+            sarif_results.push(serde_json::json!({
+                "ruleId": finding_codes::AUTH_GAP,
+                "level": "error",
+                "message": { "text": format!("Missing require_auth() in function {}", gap.function_name) },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": gap.function_name.split(':').next().unwrap_or("unknown") },
+                        "region": { "startLine": 1 }
+                    }
+                }]
+            }));
+        }
+        for issue in &panic_issues {
+            sarif_results.push(serde_json::json!({
+                "ruleId": finding_codes::PANIC_USAGE,
+                "level": "warning",
+                "message": { "text": format!("{} at {}", issue.issue_type, issue.location) },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": issue.location.split(':').next().unwrap_or("unknown") },
+                        "region": { "startLine": 1 }
+                    }
+                }]
+            }));
+        }
+        for issue in &arithmetic_issues {
+            sarif_results.push(serde_json::json!({
+                "ruleId": finding_codes::ARITHMETIC_OVERFLOW,
+                "level": "warning",
+                "message": { "text": format!("Unchecked {} at {}", issue.operation, issue.location) },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": issue.location.split(':').next().unwrap_or("unknown") },
+                        "region": { "startLine": 1 }
+                    }
+                }]
+            }));
+        }
+
+        let sarif_log = crate::commands::sarif::build_sarif_log(
+            "Sanctifier",
+            env!("CARGO_PKG_VERSION"),
+            sarif_results,
+        );
+
+        if let Err(e) = crate::commands::sarif::validate_sarif(&sarif_log) {
+            eprintln!("{}", c::red("SARIF validation failed:"));
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+
+        println!("{}", serde_json::to_string_pretty(&sarif_log)?);
+        return Ok(should_exit_with_1);
+    }
+
     println!(
         "\n{} Static analysis complete. ({} served from cache, {} re-analysed, {} ms)",
-        "✨".green(),
-        cached_count.to_string().bold(),
-        reanalysed_count.to_string().bold(),
+        c::green("✨"),
+        c::bold(&cached_count.to_string()),
+        c::bold(&reanalysed_count.to_string()),
         duration_ms
     );
     Ok(should_exit_with_1)

@@ -207,6 +207,8 @@ pub fn all_finding_codes() -> Vec<FindingCode> {
             code: SHALLOW_TEST,
             category: "test_quality",
             description: "#[test] function never references a ContractClient, bypassing serialization and auth paths exercised by the Soroban host-function boundary",
+        },
+        FindingCode {
             code: TRANSFER_FROM_NO_ALLOWANCE,
             category: "token_safety",
             description: "transfer_from-style function moves 'from' balance without checking or decrementing the spender's allowance, allowing any caller to drain any account",

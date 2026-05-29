@@ -15,6 +15,7 @@ pub mod gas_report;
 pub mod patcher;
 pub mod reentrancy;
 pub mod rules;
+pub mod sdk_version;
 pub mod sep41;
 #[cfg(feature = "smt")]
 pub mod smt;

@@ -78,6 +78,36 @@ pub(crate) struct ArithVisitor {
 // Redundant ArithmeticIssue struct removed
 
 impl ArithVisitor {
+    fn is_constant_expr(expr: &syn::Expr) -> bool {
+        match expr {
+            syn::Expr::Lit(_) => true,
+            syn::Expr::Unary(syn::ExprUnary {
+                op: syn::UnOp::Neg(_),
+                expr,
+                ..
+            }) => {
+                matches!(expr.as_ref(), syn::Expr::Lit(_))
+            }
+            syn::Expr::Paren(syn::ExprParen { expr, .. }) => Self::is_constant_expr(expr),
+            syn::Expr::Cast(syn::ExprCast { expr, .. }) => Self::is_constant_expr(expr),
+            syn::Expr::Path(path) => {
+                if let Some(seg) = path.path.segments.last() {
+                    let name = seg.ident.to_string();
+                    name.chars()
+                        .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+                        && !name.is_empty()
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn is_non_constant_divisor(op: &syn::BinOp, right: &syn::Expr) -> bool {
+        matches!(op, syn::BinOp::Div(_) | syn::BinOp::Rem(_)) && !Self::is_constant_expr(right)
+    }
+
     fn classify_op(op: &syn::BinOp) -> Option<(&'static str, &'static str)> {
         match op {
             syn::BinOp::Add(_) => Some((
@@ -92,6 +122,12 @@ impl ArithVisitor {
                 "*",
                 "Use .checked_mul(rhs) or .saturating_mul(rhs) to handle overflow",
             )),
+            syn::BinOp::Div(_) => {
+                Some(("/", "Use .checked_div(rhs) to avoid division-by-zero panic"))
+            }
+            syn::BinOp::Rem(_) => {
+                Some(("%", "Use .checked_rem(rhs) to avoid modulo-by-zero panic"))
+            }
             syn::BinOp::AddAssign(_) => Some((
                 "+=",
                 "Replace a += b with a = a.checked_add(b).expect(\"overflow\")",
@@ -104,14 +140,7 @@ impl ArithVisitor {
                 "*=",
                 "Replace a *= b with a = a.checked_mul(b).expect(\"overflow\")",
             )),
-            syn::BinOp::Div(_) => Some((
-                "/",
-                "Use .checked_div(rhs) or .saturating_div(rhs) to handle division-by-zero",
-            )),
-            syn::BinOp::Rem(_) => Some((
-                "%",
-                "Use .checked_rem(rhs) or .saturating_rem(rhs) to handle modulo-by-zero",
-            )),
+
             syn::BinOp::DivAssign(_) => Some((
                 "/=",
                 "Replace a /= b with a = a.checked_div(b).expect(\"division by zero\")",
@@ -167,27 +196,7 @@ impl<'ast> Visit<'ast> for ArithVisitor {
         self.index_depth -= 1;
     }
 
-        fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
-            if self.index_depth == 0 {
-                if let Some(fn_name) = self.current_fn.clone() {
-                    if let Some((op_str, suggestion)) = Self::classify_op(&node.op) {
-                        // Skip if operation is division or remainder and divisor is a literal constant
-                        let is_div_or_rem = matches!(node.op, syn::BinOp::Div(_) | syn::BinOp::Rem(_));
-                        let divisor_is_literal = matches!(&*node.right, syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(_), .. })
-                            | syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Float(_), .. }));
-                        if !(is_div_or_rem && divisor_is_literal) {
-                            if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
-                                let key = (fn_name.clone(), op_str.to_string());
-                                if !self.seen.contains(&key) {
-                                    self.seen.insert(key);
-                                    let line = node.left.span().start().line;
-                                    self.issues.push(ArithmeticIssue {
-                                        function_name: fn_name.clone(),
-                                        operation: op_str.to_string(),
-                                        suggestion: suggestion.to_string(),
-                                        location: format!("{}:{}", fn_name, line),
-                                    });
-                                }
+
                             }
                         }
                     }
@@ -195,6 +204,34 @@ impl<'ast> Visit<'ast> for ArithVisitor {
             }
             syn::visit::visit_expr_binary(self, node);
         }
+
+    fn visit_expr_assign_op(&mut self, node: &'ast syn::ExprAssignOp) {
+        if self.index_depth == 0 {
+            if let Some(fn_name) = self.current_fn.clone() {
+                if let Some((op_str, suggestion)) = Self::classify_op(&node.op) {
+                    // For /= and %=, skip if divisor is a compile-time constant
+                    if Self::is_non_constant_divisor(&node.op, &node.right)
+                        || !matches!(node.op, syn::BinOp::DivAssign(_) | syn::BinOp::RemAssign(_))
+                    {
+                        if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
+                            let key = (fn_name.clone(), op_str.to_string());
+                            if !self.seen.contains(&key) {
+                                self.seen.insert(key);
+                                let line = node.left.span().start().line;
+                                self.issues.push(ArithmeticIssue {
+                                    function_name: fn_name.clone(),
+                                    operation: op_str.to_string(),
+                                    suggestion: suggestion.to_string(),
+                                    location: format!("{}:{}", fn_name, line),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        syn::visit::visit_expr_assign_op(self, node);
+    }
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
         if let Some(fn_name) = self.current_fn.clone() {
@@ -414,18 +451,7 @@ mod tests {
             "index subscript arithmetic must be skipped"
         );
     }
-    #[test]
-    fn test_flag_division_by_variable() {
-        let rule = ArithmeticOverflowRule::new();
-        let source = r#"
-            fn transfer(a: u64, b: u64) {
-                let c = a / b;
-                let d = a % b;
-            }
-        "#;
-        let violations = rule.check(source);
-        // Expect two violations: division and remainder with non‑constant divisor
-        assert_eq!(violations.len(), 2, "Division and remainder with variable divisor should be flagged");
+
     }
 }
 

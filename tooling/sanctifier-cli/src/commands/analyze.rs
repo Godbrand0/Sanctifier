@@ -2,6 +2,7 @@ use crate::vulndb::{VulnDatabase, VulnMatch};
 use clap::Args;
 use colored::*;
 #[allow(unused_imports)]
+
 use rayon::prelude::*;
 use sanctifier_core::finding_codes;
 use sanctifier_core::rules::RuleRegistry;
@@ -71,7 +72,7 @@ pub struct AnalyzeArgs {
     /// Path to the contract directory or Cargo.toml
     #[arg(default_value = ".")]
     pub path: PathBuf,
-    /// Output format: text | json | ndjson (newline-delimited JSON, one finding per line)
+
     #[arg(short, long, default_value = "text")]
     pub format: String,
     /// Limit for ledger entry size in bytes
@@ -140,6 +141,60 @@ pub fn exec(args: AnalyzeArgs) -> anyhow::Result<()> {
 pub(crate) fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
     if args.format == "ndjson" {
         return stream_ndjson(&args);
+
+
+    let config = SanctifyConfig::default();
+    let analyzer = Analyzer::new(config);
+
+    let mut collisions = Vec::new();
+
+    if path.is_dir() {
+        walk_dir(path, &analyzer, &mut collisions)?;
+    } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+        if let Ok(content) = fs::read_to_string(path) {
+            collisions.extend(analyzer.scan_storage_collisions(&content));
+        }
+        for vuln in &vuln_matches {
+            if let Ok(sev) = vuln.severity.parse::<SeverityLevel>() {
+                consider(sev);
+            }
+        }
+        if !timed_out_files.is_empty() {
+            consider(SeverityLevel::Low);
+        }
+        if !contractimport_issues.is_empty() {
+            consider(SeverityLevel::Medium);
+        }
+        highest
+    };
+
+    // Profile overrides --exit-code / --min-severity when set
+    let should_exit_with_1 = match args.profile {
+        Some(AnalysisProfile::Strict)  => total_findings > 0,
+        Some(AnalysisProfile::Lenient) => false,
+        Some(AnalysisProfile::Audit)   => false,
+        Some(AnalysisProfile::Ci)      => has_critical || has_high,
+        None => args.exit_code && highest_finding_severity
+            .map(|h| h >= args.min_severity)
+            .unwrap_or(false),
+    };
+
+    let timestamp = chrono_timestamp();
+    let _duration_ms = start.elapsed().as_millis() as u64;
+    let duration_ms = _duration_ms;
+
+    let webhook_payload = ScanWebhookPayload {
+        event: "scan.completed",
+        project_path: path.display().to_string(),
+        timestamp_unix: timestamp.clone(),
+        summary: ScanWebhookSummary {
+            total_findings,
+            has_critical,
+            has_high,
+        },
+    };
+    if let Err(err) = send_scan_completed_webhooks(&args.webhook_urls, &webhook_payload) {
+        warn!(target: "sanctifier", error = %err, "Failed to initialize webhook client");
     }
 
     let path = &args.path;
@@ -168,6 +223,14 @@ pub(crate) fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
         for v in registry.run_all(&content) {
             all_violations.push((file_str.clone(), v));
         }
+    // ── Text output ──────────────────────────────────────────────────────────
+    if let Some(profile) = args.profile {
+        println!(
+            "{} Profile: {} — {}",
+            c::blue("ℹ"),
+            c::bold(profile.as_str()),
+            profile.description()
+        );
     }
 
     let total = all_violations.len();
@@ -200,6 +263,22 @@ pub(crate) fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
                 },
             }))?
         );
+            "\n{} {} file(s) timed out ({}s limit):",
+            c::yellow("⏱️"),
+            timed_out_files.len(),
+            timeout_secs
+        );
+        for f in &timed_out_files {
+            println!(
+                "   {} [{}] {}",
+                c::red("->"),
+                c::bold(finding_codes::ANALYSIS_TIMEOUT),
+                f
+            );
+        }
+    }
+    if collisions.is_empty() {
+        println!("\n{} No storage key collisions found.", c::green("✅"));
     } else {
         if all_violations.is_empty() {
             println!("\n{} No issues found.", "✅".green());
@@ -323,6 +402,167 @@ fn walk_dir(
         }
     }
     Ok(())
+            "\n{} Found potential Storage Key Collisions!",
+            c::yellow("⚠️")
+        );
+
+                }
+                println!("      Location: {}", finding.location);
+                println!("      Message: {}", finding.message);
+                println!("      Suggestion: {}", finding.suggestion);
+            }
+        }
+    }
+    if !smt_issues.is_empty() {
+        println!("\n{} Found Formal Verification (SMT) issues!", c::red("❌"));
+        for issue in &smt_issues {
+            println!(
+                "   {} [{}] Function: {}",
+                c::red("->"),
+                c::bold(finding_codes::SMT_INVARIANT_VIOLATION),
+                c::bold(&issue.function_name)
+            );
+            println!("      Description: {}", issue.description);
+            println!("      Location: {}", issue.location);
+        }
+    }
+    if !sep41_checked_contracts.is_empty() && sep41_issues.is_empty() {
+        println!("{} SEP-41 token interface verified exactly.", c::green("✅"));
+    } else if !sep41_issues.is_empty() {
+        println!("\n{} Found SEP-41 Interface Deviations!", c::yellow("⚠️"));
+        for issue in &sep41_issues {
+            println!(
+                "   {} [{}] Function: {}",
+                c::red("->"),
+                c::bold(finding_codes::SEP41_INTERFACE_DEVIATION),
+                c::bold(&issue.function_name)
+            );
+            println!("      Kind: {:?}", issue.kind);
+            println!("      Location: {}", issue.location);
+            println!("      Message: {}", issue.message);
+            println!("      Expected: {}", issue.expected_signature);
+            if let Some(actual) = &issue.actual_signature {
+                println!("      Actual: {}", actual);
+            }
+        }
+    }
+    if !contractimport_issues.is_empty() {
+        println!("\n{} Found ContractImport Mismatches!", c::yellow("⚠️"));
+        for issue in &contractimport_issues {
+            println!(
+                "   {} [{}] WASM: {}",
+                c::red("->"),
+                c::bold(finding_codes::CONTRACTIMPORT_MISMATCH),
+                c::bold(&issue.wasm_path)
+            );
+            println!("      Location: {}", issue.location);
+            println!("      Message: {}", issue.message);
+        }
+    }
+    if vuln_matches.is_empty() {
+        println!(
+            "{} No known vulnerability patterns matched (DB v{}).",
+            c::green("✅"),
+            vuln_db.version
+        );
+    } else {
+        println!(
+            "\n{} Found {} known vulnerability pattern(s) (DB v{})!",
+            c::red("🛡️"),
+            vuln_matches.len(),
+            vuln_db.version
+        );
+        for m in &vuln_matches {
+            let sev_icon = match m.severity.as_str() {
+                "critical" => c::red("❌"),
+                "high" => c::red("🔴"),
+                "medium" => c::yellow("⚠️"),
+                _ => c::blue("ℹ️"),
+            };
+            println!(
+                "   {} [{}] {} ({})",
+                sev_icon,
+                c::bold(&m.vuln_id),
+                c::bold(&m.name),
+                m.severity.to_uppercase()
+            );
+            println!("      File: {}:{}", m.file, m.line);
+            println!("      {}", m.description);
+            if !m.recommendation.is_empty() {
+                println!("      Suggestion: {}", m.recommendation);
+            }
+        }
+    }
+
+    let cached_count = cached_counter.load(Ordering::Relaxed);
+    let reanalysed_count = total_files - cached_count;
+
+    if is_sarif {
+        let mut sarif_results: Vec<serde_json::Value> = Vec::new();
+        for gap in &auth_gaps {
+            sarif_results.push(serde_json::json!({
+                "ruleId": finding_codes::AUTH_GAP,
+                "level": "error",
+                "message": { "text": format!("Missing require_auth() in function {}", gap.function_name) },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": gap.function_name.split(':').next().unwrap_or("unknown") },
+                        "region": { "startLine": 1 }
+                    }
+                }]
+            }));
+        }
+        for issue in &panic_issues {
+            sarif_results.push(serde_json::json!({
+                "ruleId": finding_codes::PANIC_USAGE,
+                "level": "warning",
+                "message": { "text": format!("{} at {}", issue.issue_type, issue.location) },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": issue.location.split(':').next().unwrap_or("unknown") },
+                        "region": { "startLine": 1 }
+                    }
+                }]
+            }));
+        }
+        for issue in &arithmetic_issues {
+            sarif_results.push(serde_json::json!({
+                "ruleId": finding_codes::ARITHMETIC_OVERFLOW,
+                "level": "warning",
+                "message": { "text": format!("Unchecked {} at {}", issue.operation, issue.location) },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": issue.location.split(':').next().unwrap_or("unknown") },
+                        "region": { "startLine": 1 }
+                    }
+                }]
+            }));
+        }
+
+        let sarif_log = crate::commands::sarif::build_sarif_log(
+            "Sanctifier",
+            env!("CARGO_PKG_VERSION"),
+            sarif_results,
+        );
+
+        if let Err(e) = crate::commands::sarif::validate_sarif(&sarif_log) {
+            eprintln!("{}", c::red("SARIF validation failed:"));
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+
+        println!("{}", serde_json::to_string_pretty(&sarif_log)?);
+        return Ok(should_exit_with_1);
+    }
+
+    println!(
+        "\n{} Static analysis complete. ({} served from cache, {} re-analysed, {} ms)",
+        c::green("✨"),
+        c::bold(&cached_count.to_string()),
+        c::bold(&reanalysed_count.to_string()),
+        duration_ms
+    );
+    Ok(should_exit_with_1)
 }
 
 // ── Analyse one file ─────────────────────────────────────────────────────────

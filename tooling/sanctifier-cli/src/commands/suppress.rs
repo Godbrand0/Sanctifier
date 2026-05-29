@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 use std::fs;
 use std::path::PathBuf;
-use toml_edit::{value, Array, DocumentMut, Item, Table};
+use toml_edit::{value, Array, DocumentMut, InlineTable, Item, Table, Value};
 
 #[derive(Args)]
 pub struct SuppressArgs {
@@ -81,18 +81,18 @@ fn add_suppression(
 
     // Get or create array for this code
     if !suppressions.contains_key(code) {
-        suppressions[code] = Item::Value(toml_edit::Value::Array(Array::new()));
+        suppressions[code] = value(Array::new());
     }
 
     let code_array = suppressions[code]
         .as_array_mut()
         .context("suppression entry must be an array")?;
 
-    // Create suppression entry as an inline table value
-    let mut entry = toml_edit::InlineTable::new();
-    entry.insert("file", toml_edit::Value::from(file.display().to_string()));
-    entry.insert("line", toml_edit::Value::from(line as i64));
-    entry.insert("reason", toml_edit::Value::from(reason));
+    // Create suppression entry
+    let mut entry = InlineTable::new();
+    entry.insert("file", Value::from(file.display().to_string()));
+    entry.insert("line", Value::from(line as i64));
+    entry.insert("reason", Value::from(reason.to_owned()));
 
     code_array.push(toml_edit::Value::InlineTable(entry));
 
@@ -139,17 +139,17 @@ fn list_suppressions(config_path: &PathBuf) -> Result<()> {
                 continue;
             };
 
-            let file = table
+            let file: &str = table
                 .get("file")
-                .and_then(|f| f.as_str())
+                .and_then(|f: &toml_edit::Value| f.as_str())
                 .unwrap_or("<unknown>");
-            let line = table
+            let line: i64 = table
                 .get("line")
-                .and_then(|l| l.as_integer())
+                .and_then(|l: &toml_edit::Value| l.as_integer())
                 .unwrap_or(0);
-            let reason = table
+            let reason: &str = table
                 .get("reason")
-                .and_then(|r| r.as_str())
+                .and_then(|r: &toml_edit::Value| r.as_str())
                 .unwrap_or("<no reason>");
 
             println!("  {} in {}:{}", code, file, line);

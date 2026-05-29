@@ -78,6 +78,36 @@ pub(crate) struct ArithVisitor {
 // Redundant ArithmeticIssue struct removed
 
 impl ArithVisitor {
+    fn is_constant_expr(expr: &syn::Expr) -> bool {
+        match expr {
+            syn::Expr::Lit(_) => true,
+            syn::Expr::Unary(syn::ExprUnary {
+                op: syn::UnOp::Neg(_),
+                expr,
+                ..
+            }) => {
+                matches!(expr.as_ref(), syn::Expr::Lit(_))
+            }
+            syn::Expr::Paren(syn::ExprParen { expr, .. }) => Self::is_constant_expr(expr),
+            syn::Expr::Cast(syn::ExprCast { expr, .. }) => Self::is_constant_expr(expr),
+            syn::Expr::Path(path) => {
+                if let Some(seg) = path.path.segments.last() {
+                    let name = seg.ident.to_string();
+                    name.chars()
+                        .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+                        && !name.is_empty()
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn is_non_constant_divisor(op: &syn::BinOp, right: &syn::Expr) -> bool {
+        matches!(op, syn::BinOp::Div(_) | syn::BinOp::Rem(_)) && !Self::is_constant_expr(right)
+    }
+
     fn classify_op(op: &syn::BinOp) -> Option<(&'static str, &'static str)> {
         match op {
             syn::BinOp::Add(_) => Some((
@@ -92,6 +122,12 @@ impl ArithVisitor {
                 "*",
                 "Use .checked_mul(rhs) or .saturating_mul(rhs) to handle overflow",
             )),
+            syn::BinOp::Div(_) => {
+                Some(("/", "Use .checked_div(rhs) to avoid division-by-zero panic"))
+            }
+            syn::BinOp::Rem(_) => {
+                Some(("%", "Use .checked_rem(rhs) to avoid modulo-by-zero panic"))
+            }
             syn::BinOp::AddAssign(_) => Some((
                 "+=",
                 "Replace a += b with a = a.checked_add(b).expect(\"overflow\")",
@@ -103,6 +139,14 @@ impl ArithVisitor {
             syn::BinOp::MulAssign(_) => Some((
                 "*=",
                 "Replace a *= b with a = a.checked_mul(b).expect(\"overflow\")",
+            )),
+            syn::BinOp::DivAssign(_) => Some((
+                "/=",
+                "Replace a /= b with a = a.checked_div(b).expect(\"division by zero\")",
+            )),
+            syn::BinOp::RemAssign(_) => Some((
+                "%=",
+                "Replace a %= b with a = a.checked_rem(b).expect(\"modulo by zero\")",
             )),
             _ => None,
         }
@@ -155,23 +199,56 @@ impl<'ast> Visit<'ast> for ArithVisitor {
         if self.index_depth == 0 {
             if let Some(fn_name) = self.current_fn.clone() {
                 if let Some((op_str, suggestion)) = Self::classify_op(&node.op) {
-                    if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
-                        let key = (fn_name.clone(), op_str.to_string());
-                        if !self.seen.contains(&key) {
-                            self.seen.insert(key);
-                            let line = node.left.span().start().line;
-                            self.issues.push(ArithmeticIssue {
-                                function_name: fn_name.clone(),
-                                operation: op_str.to_string(),
-                                suggestion: suggestion.to_string(),
-                                location: format!("{}:{}", fn_name, line),
-                            });
+                    // For / and %, skip if divisor is a compile-time constant
+                    if Self::is_non_constant_divisor(&node.op, &node.right)
+                        || !matches!(node.op, syn::BinOp::Div(_) | syn::BinOp::Rem(_))
+                    {
+                        if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
+                            let key = (fn_name.clone(), op_str.to_string());
+                            if !self.seen.contains(&key) {
+                                self.seen.insert(key);
+                                let line = node.left.span().start().line;
+                                self.issues.push(ArithmeticIssue {
+                                    function_name: fn_name.clone(),
+                                    operation: op_str.to_string(),
+                                    suggestion: suggestion.to_string(),
+                                    location: format!("{}:{}", fn_name, line),
+                                });
+                            }
                         }
                     }
                 }
             }
         }
         syn::visit::visit_expr_binary(self, node);
+    }
+
+    fn visit_expr_assign_op(&mut self, node: &'ast syn::ExprAssignOp) {
+        if self.index_depth == 0 {
+            if let Some(fn_name) = self.current_fn.clone() {
+                if let Some((op_str, suggestion)) = Self::classify_op(&node.op) {
+                    // For /= and %=, skip if divisor is a compile-time constant
+                    if Self::is_non_constant_divisor(&node.op, &node.right)
+                        || !matches!(node.op, syn::BinOp::DivAssign(_) | syn::BinOp::RemAssign(_))
+                    {
+                        if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
+                            let key = (fn_name.clone(), op_str.to_string());
+                            if !self.seen.contains(&key) {
+                                self.seen.insert(key);
+                                let line = node.left.span().start().line;
+                                self.issues.push(ArithmeticIssue {
+                                    function_name: fn_name.clone(),
+                                    operation: op_str.to_string(),
+                                    suggestion: suggestion.to_string(),
+                                    location: format!("{}:{}", fn_name, line),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        syn::visit::visit_expr_assign_op(self, node);
     }
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
@@ -389,5 +466,177 @@ mod tests {
             0,
             "index subscript arithmetic must be skipped"
         );
+    }
+
+    #[test]
+    fn test_flag_division_by_non_constant_divisor() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn compute() {
+                let a = 100;
+                let b = 3;
+                let c = a / b;
+            }
+        "#;
+        let violations = rule.check(source);
+        assert!(
+            violations.iter().any(|v| v.message.contains('/')),
+            "division by non-constant divisor must be flagged"
+        );
+    }
+
+    #[test]
+    fn test_skip_division_by_constant_divisor() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn compute() {
+                let a = 100;
+                let c = a / 3;
+            }
+        "#;
+        let violations = rule.check(source);
+        assert!(
+            violations.iter().all(|v| !v.message.contains('/')),
+            "division by constant divisor must NOT be flagged"
+        );
+    }
+
+    #[test]
+    fn test_flag_modulo_by_non_constant_divisor() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn compute() {
+                let a = 100;
+                let b = 7;
+                let c = a % b;
+            }
+        "#;
+        let violations = rule.check(source);
+        assert!(
+            violations.iter().any(|v| v.message.contains('%')),
+            "modulo by non-constant divisor must be flagged"
+        );
+    }
+
+    #[test]
+    fn test_skip_modulo_by_constant_divisor() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn compute() {
+                let a = 100;
+                let c = a % 7;
+            }
+        "#;
+        let violations = rule.check(source);
+        assert!(
+            violations.iter().all(|v| !v.message.contains('%')),
+            "modulo by constant divisor must NOT be flagged"
+        );
+    }
+
+    #[test]
+    fn test_flag_divide_assign_by_non_constant() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn compute() {
+                let mut a = 100;
+                let b = 3;
+                a /= b;
+            }
+        "#;
+        let violations = rule.check(source);
+        assert!(
+            violations.iter().any(|v| v.message.contains('/')),
+            "compound division by non-constant divisor must be flagged"
+        );
+    }
+
+    #[test]
+    fn test_skip_divide_assign_by_constant() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn compute() {
+                let mut a = 100;
+                a /= 3;
+            }
+        "#;
+        let violations = rule.check(source);
+        assert!(
+            violations.iter().all(|v| !v.message.contains('/')),
+            "compound division by constant divisor must NOT be flagged"
+        );
+    }
+
+    #[test]
+    fn test_flag_modulo_assign_by_non_constant() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn compute() {
+                let mut a = 100;
+                let b = 7;
+                a %= b;
+            }
+        "#;
+        let violations = rule.check(source);
+        assert!(
+            violations.iter().any(|v| v.message.contains('%')),
+            "compound modulo by non-constant divisor must be flagged"
+        );
+    }
+
+    #[test]
+    fn test_suggestion_uses_checked_div() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn compute() {
+                let a = 100;
+                let b = 3;
+                let c = a / b;
+            }
+        "#;
+        let violations = rule.check(source);
+        let div_violations: Vec<_> = violations
+            .iter()
+            .filter(|v| v.message.contains('/'))
+            .collect();
+        assert!(!div_violations.is_empty());
+        for v in &div_violations {
+            assert!(
+                v.suggestion
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("checked_div"),
+                "suggestion for division should mention checked_div, got: {:?}",
+                v.suggestion
+            );
+        }
+    }
+
+    #[test]
+    fn test_suggestion_uses_checked_rem() {
+        let rule = ArithmeticOverflowRule::new();
+        let source = r#"
+            fn compute() {
+                let a = 100;
+                let b = 7;
+                let c = a % b;
+            }
+        "#;
+        let violations = rule.check(source);
+        let rem_violations: Vec<_> = violations
+            .iter()
+            .filter(|v| v.message.contains('%'))
+            .collect();
+        assert!(!rem_violations.is_empty());
+        for v in &rem_violations {
+            assert!(
+                v.suggestion
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("checked_rem"),
+                "suggestion for modulo should mention checked_rem, got: {:?}",
+                v.suggestion
+            );
+        }
     }
 }

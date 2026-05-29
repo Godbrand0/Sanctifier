@@ -150,3 +150,23 @@ export interface WorkspaceSummary {
   shared_libs: string[];
   grand_total_findings: number;
 }
+
+export type DiffStatus = "added" | "removed" | "unchanged" | "severity_changed";
+
+export interface DiffFinding {
+  finding: Finding;
+  status: DiffStatus;
+  previousSeverity?: Severity;
+}
+
+export interface ReportDiff {
+  baselineName: string;
+  currentName: string;
+  baselineFindings: Finding[];
+  currentFindings: Finding[];
+  diffFindings: DiffFinding[];
+  addedCount: number;
+  removedCount: number;
+  unchangedCount: number;
+  severityChangedCount: number;
+}

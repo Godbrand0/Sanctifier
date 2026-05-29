@@ -282,66 +282,6 @@ fn is_storage_mutation(method: &str, receiver: &syn::Expr) -> bool {
         || receiver_str.contains("instance")
 }
 
-fn is_token_transfer(method: &str) -> bool {
-    matches!(method, "transfer" | "transfer_from" | "burn")
-}
-
-/// An edge in the contract call graph produced by `scan_invoke_contract_calls`.
-#[derive(Debug, Serialize, Clone)]
-pub struct ReentrancyEdge {
-    pub caller_function: String,
-    pub target_contract: String,
-    pub target_function: String,
-    pub function_expr: Option<String>,
-}
-
-struct CallVisitor {
-    edges: Vec<ReentrancyEdge>,
-    current_fn: String,
-}
-
-impl<'ast> Visit<'ast> for CallVisitor {
-    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        let prev = self.current_fn.clone();
-        self.current_fn = node.sig.ident.to_string();
-        syn::visit::visit_impl_item_fn(self, node);
-        self.current_fn = prev;
-    }
-
-    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        let prev = self.current_fn.clone();
-        self.current_fn = node.sig.ident.to_string();
-        syn::visit::visit_item_fn(self, node);
-        self.current_fn = prev;
-    }
-
-    fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
-        if node.method == "invoke_contract" || node.method == "call" {
-            self.edges.push(ReentrancyEdge {
-                caller_function: self.current_fn.clone(),
-                target_contract: "Unknown".to_string(),
-                target_function: "Unknown".to_string(),
-                function_expr: Some(quote!(#node).to_string()),
-            });
-        }
-        syn::visit::visit_expr_method_call(self, node);
-    }
-}
-
-pub fn scan_invoke_contract_calls(source: &str) -> Vec<ReentrancyEdge> {
-    let file = match parse_str::<File>(source) {
-        Ok(f) => f,
-        Err(_) => return vec![],
-    };
-
-    let mut visitor = CallVisitor {
-        edges: Vec::new(),
-        current_fn: String::new(),
-    };
-    visitor.visit_file(&file);
-    visitor.edges
-}
-
 fn count_invoke_contract_calls(block: &syn::Block) -> usize {
     let mut count = 0;
     count_in_block(block, &mut count);
@@ -449,38 +389,6 @@ fn build_guard_patch(block: &syn::Block, fn_name: &str) -> Option<Patch> {
         }
     }
     None
-}
-
-fn contains_invoke_contract(expr: &syn::Expr) -> bool {
-    match expr {
-        syn::Expr::MethodCall(mc) => {
-            mc.method == "invoke_contract"
-                || mc.method == "invoke_contract_check"
-                || contains_invoke_contract(&mc.receiver)
-                || mc.args.iter().any(contains_invoke_contract)
-        }
-        syn::Expr::Call(c) => {
-            if let syn::Expr::Path(p) = &*c.func {
-                if let Some(seg) = p.path.segments.last() {
-                    let ident = seg.ident.to_string();
-                    if ident == "invoke_contract" || ident == "invoke_contract_check" {
-                        return true;
-                    }
-                }
-            }
-            c.args.iter().any(contains_invoke_contract)
-        }
-        syn::Expr::Block(b) => b.block.stmts.iter().any(|s| match s {
-            syn::Stmt::Expr(e, _) => contains_invoke_contract(e),
-            syn::Stmt::Local(l) => l
-                .init
-                .as_ref()
-                .map(|i| contains_invoke_contract(&i.expr))
-                .unwrap_or(false),
-            _ => false,
-        }),
-        _ => false,
-    }
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────

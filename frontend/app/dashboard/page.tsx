@@ -8,7 +8,7 @@ import { normalizeFindingCodeQuery, validateFindingCodeQuery } from "../lib/find
 import { validateContractBatch } from "../lib/upload-validation";
 import type { RejectedFile } from "../lib/upload-validation";
 import type { FileProgress } from "../components/DashboardHeader";
-import type { WorkspaceSummary } from "../types";
+import type { WorkspaceSummary, AnalysisReport } from "../types";
 import {
   createWorkspaceFromSingleReport,
   extractErrorMessage,
@@ -21,6 +21,7 @@ import { SeverityFilter } from "../components/SeverityFilter";
 import { FindingsList } from "../components/FindingsList";
 import { SummaryChart } from "../components/SummaryChart";
 import { SanctityScore } from "../components/SanctityScore";
+import { ComparisonView } from "../components/ComparisonView";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { useWorkspace } from "../providers/WorkspaceProvider";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
@@ -35,13 +36,14 @@ const CallGraph = dynamic(() => import("../components/CallGraph").then((m) => m.
   ),
 });
 
-type Tab = "findings" | "callgraph";
+type Tab = "findings" | "callgraph" | "diff";
 
 export default function DashboardPage() {
   const { selectedContract, setWorkspace, updateContractReport } = useWorkspace();
   const [severityFilter, setSeverityFilter] = useState<Severity | "all">("all");
   const [error, setError] = useState<string | null>(null);
   const [jsonInput, setJsonInput] = useState("");
+  const [baselineJsonInput, setBaselineJsonInput] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("findings");
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [isUploadingContract, setIsUploadingContract] = useState(false);
@@ -68,6 +70,16 @@ export default function DashboardPage() {
       ...extractCallGraph(report)
     };
   }, [currentReport]);
+
+  const baselineReport: AnalysisReport | null = useMemo(() => {
+    if (!baselineJsonInput.trim()) return null;
+    try {
+      const parsed = JSON.parse(baselineJsonInput);
+      return normalizeReport(parsed);
+    } catch {
+      return null;
+    }
+  }, [baselineJsonInput]);
 
   const applyReport = useCallback((rawReport: unknown) => {
     startTransition(() => {
@@ -279,6 +291,19 @@ export default function DashboardPage() {
                   >
                     Call Graph
                   </button>
+                  <button
+                    onClick={() => setActiveTab("diff")}
+                    role="tab"
+                    aria-selected={activeTab === "diff"}
+                    aria-controls="diff-panel"
+                    id="diff-tab"
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-zinc-400 ${activeTab === "diff"
+                        ? "border-zinc-900 dark:border-zinc-100 theme-high-contrast:border-yellow-300 text-zinc-900 dark:text-zinc-100 theme-high-contrast:text-yellow-300"
+                        : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 theme-high-contrast:text-white theme-high-contrast:hover:text-yellow-300"
+                      }`}
+                  >
+                    Diff
+                  </button>
                 </div>
 
                 {activeTab === "findings" && (
@@ -333,6 +358,46 @@ export default function DashboardPage() {
                     <ErrorBoundary>
                       <CallGraph nodes={callGraphNodes} edges={callGraphEdges} />
                     </ErrorBoundary>
+                  </section>
+                )}
+
+                {activeTab === "diff" && (
+                  <section id="diff-panel" role="tabpanel" aria-labelledby="diff-tab">
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label htmlFor="baseline-json-input" className="mb-1 block text-sm font-medium">
+                            Baseline Report (JSON)
+                          </label>
+                          <textarea
+                            id="baseline-json-input"
+                            value={baselineJsonInput}
+                            onChange={(e) => setBaselineJsonInput(e.target.value)}
+                            placeholder='Paste baseline JSON report here...'
+                            rows={4}
+                            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-xs outline-none transition focus-visible:ring-2 focus-visible:ring-zinc-400 dark:border-zinc-600 dark:bg-zinc-950"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-sm font-medium">
+                            Current Report
+                          </label>
+                          <div className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-950 px-3 py-2 font-mono text-xs min-h-[5rem] text-zinc-500 dark:text-zinc-400">
+                            {currentReport
+                              ? "Current report loaded from the active contract."
+                              : "No current report loaded. Upload a contract first."}
+                          </div>
+                        </div>
+                      </div>
+                      <ErrorBoundary>
+                        <ComparisonView
+                          baselineReport={baselineReport}
+                          currentReport={currentReport ? normalizeReport(currentReport) : null}
+                          baselineName="Baseline"
+                          currentName={selectedContract?.name ?? "Current"}
+                        />
+                      </ErrorBoundary>
+                    </div>
                   </section>
                 )}
               </>

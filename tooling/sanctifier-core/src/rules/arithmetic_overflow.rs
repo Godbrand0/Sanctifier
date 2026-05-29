@@ -104,6 +104,22 @@ impl ArithVisitor {
                 "*=",
                 "Replace a *= b with a = a.checked_mul(b).expect(\"overflow\")",
             )),
+            syn::BinOp::Div(_) => Some((
+                "/",
+                "Use .checked_div(rhs) or .saturating_div(rhs) to handle division-by-zero",
+            )),
+            syn::BinOp::Rem(_) => Some((
+                "%",
+                "Use .checked_rem(rhs) or .saturating_rem(rhs) to handle modulo-by-zero",
+            )),
+            syn::BinOp::DivAssign(_) => Some((
+                "/=",
+                "Replace a /= b with a = a.checked_div(b).expect(\"division by zero\")",
+            )),
+            syn::BinOp::RemAssign(_) => Some((
+                "%=",
+                "Replace a %= b with a = a.checked_rem(b).expect(\"modulo by zero\")",
+            )),
             _ => None,
         }
     }
@@ -151,28 +167,34 @@ impl<'ast> Visit<'ast> for ArithVisitor {
         self.index_depth -= 1;
     }
 
-    fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
-        if self.index_depth == 0 {
-            if let Some(fn_name) = self.current_fn.clone() {
-                if let Some((op_str, suggestion)) = Self::classify_op(&node.op) {
-                    if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
-                        let key = (fn_name.clone(), op_str.to_string());
-                        if !self.seen.contains(&key) {
-                            self.seen.insert(key);
-                            let line = node.left.span().start().line;
-                            self.issues.push(ArithmeticIssue {
-                                function_name: fn_name.clone(),
-                                operation: op_str.to_string(),
-                                suggestion: suggestion.to_string(),
-                                location: format!("{}:{}", fn_name, line),
-                            });
+        fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
+            if self.index_depth == 0 {
+                if let Some(fn_name) = self.current_fn.clone() {
+                    if let Some((op_str, suggestion)) = Self::classify_op(&node.op) {
+                        // Skip if operation is division or remainder and divisor is a literal constant
+                        let is_div_or_rem = matches!(node.op, syn::BinOp::Div(_) | syn::BinOp::Rem(_));
+                        let divisor_is_literal = matches!(&*node.right, syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Int(_), .. })
+                            | syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Float(_), .. }));
+                        if !(is_div_or_rem && divisor_is_literal) {
+                            if !is_string_literal(&node.left) && !is_string_literal(&node.right) {
+                                let key = (fn_name.clone(), op_str.to_string());
+                                if !self.seen.contains(&key) {
+                                    self.seen.insert(key);
+                                    let line = node.left.span().start().line;
+                                    self.issues.push(ArithmeticIssue {
+                                        function_name: fn_name.clone(),
+                                        operation: op_str.to_string(),
+                                        suggestion: suggestion.to_string(),
+                                        location: format!("{}:{}", fn_name, line),
+                                    });
+                                }
+                            }
                         }
                     }
                 }
             }
+            syn::visit::visit_expr_binary(self, node);
         }
-        syn::visit::visit_expr_binary(self, node);
-    }
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
         if let Some(fn_name) = self.current_fn.clone() {
@@ -276,10 +298,12 @@ mod tests {
                 let c = a + b;
                 let d = a - b;
                 let e = a * b;
+                let f = a / b;
+                let g = a % b;
             }
         "#;
         let violations = rule.check(source);
-        assert_eq!(violations.len(), 3);
+        assert_eq!(violations.len(), 5);
     }
 
     #[test]

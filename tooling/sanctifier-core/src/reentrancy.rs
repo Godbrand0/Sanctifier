@@ -1,15 +1,21 @@
 //! Reentrancy analysis for Soroban contracts.
-use quote::quote;
-use serde::Serialize;
-use syn::visit::Visit;
-use syn::{ExprMethodCall, File};
-
 use crate::rules::{Patch, Rule, RuleViolation, Severity};
 use syn::spanned::Spanned;
-use syn::{parse_str, Item};
+use syn::{parse_str, File, Item};
 
 /// Storage key used by the auto-generated reentrancy guard.
 const REENTRANCY_LOCK_KEY: &str = "REENTRANCY_LOCK";
+
+// ── Public types for call graph analysis ──────────────────────────────────────
+
+/// Represents an edge in the cross-contract call graph.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReentrancyEdge {
+    /// The function making the call
+    pub caller_function: String,
+    /// The target contract being invoked
+    pub target_contract: String,
+}
 
 // ── Rule struct ───────────────────────────────────────────────────────────────
 
@@ -282,6 +288,10 @@ fn is_storage_mutation(method: &str, receiver: &syn::Expr) -> bool {
         || receiver_str.contains("instance")
 }
 
+fn is_token_transfer(method: &str) -> bool {
+    matches!(method, "transfer" | "transfer_from" | "burn" | "burn_from")
+}
+
 fn count_invoke_contract_calls(block: &syn::Block) -> usize {
     let mut count = 0;
     count_in_block(block, &mut count);
@@ -342,6 +352,39 @@ fn count_in_expr(expr: &syn::Expr, count: &mut usize) {
             }
         }
         _ => {}
+    }
+}
+
+fn contains_invoke_contract(expr: &syn::Expr) -> bool {
+    match expr {
+        syn::Expr::MethodCall(mc) => {
+            let method = mc.method.to_string();
+            if method == "invoke_contract" || method == "invoke_contract_check" {
+                return true;
+            }
+            contains_invoke_contract(&mc.receiver) || mc.args.iter().any(contains_invoke_contract)
+        }
+        syn::Expr::Call(c) => {
+            if let syn::Expr::Path(p) = &*c.func {
+                if let Some(seg) = p.path.segments.last() {
+                    let ident = seg.ident.to_string();
+                    if ident == "invoke_contract" || ident == "invoke_contract_check" {
+                        return true;
+                    }
+                }
+            }
+            c.args.iter().any(contains_invoke_contract)
+        }
+        syn::Expr::Block(b) => b.block.stmts.iter().any(|s| match s {
+            syn::Stmt::Expr(e, _) => contains_invoke_contract(e),
+            syn::Stmt::Local(l) => l
+                .init
+                .as_ref()
+                .map(|i| contains_invoke_contract(&i.expr))
+                .unwrap_or(false),
+            _ => false,
+        }),
+        _ => false,
     }
 }
 
@@ -547,3 +590,106 @@ mod tests {
     }
 
 }
+
+// ── Public API for call graph analysis ────────────────────────────────────────
+
+/// Scan source code for invoke_contract calls and return edges for call graph.
+/// This is a simplified implementation that extracts cross-contract calls.
+pub fn scan_invoke_contract_calls(source: &str) -> Vec<ReentrancyEdge> {
+    let mut edges = Vec::new();
+    
+    let file = match parse_str::<syn::File>(source) {
+        Ok(f) => f,
+        Err(_) => return edges,
+    };
+
+    for item in &file.items {
+        if let Item::Impl(impl_item) = item {
+            for impl_item_inner in &impl_item.items {
+                if let syn::ImplItem::Fn(method) = impl_item_inner {
+                    let fn_name = method.sig.ident.to_string();
+                    scan_block_for_calls(&method.block, &fn_name, &mut edges);
+                }
+            }
+        }
+    }
+
+    edges
+}
+
+fn scan_block_for_calls(block: &syn::Block, fn_name: &str, edges: &mut Vec<ReentrancyEdge>) {
+    for stmt in &block.stmts {
+        match stmt {
+            syn::Stmt::Local(l) => {
+                if let Some(init) = &l.init {
+                    scan_expr_for_calls(&init.expr, fn_name, edges);
+                }
+            }
+            syn::Stmt::Expr(e, _) => scan_expr_for_calls(e, fn_name, edges),
+            _ => {}
+        }
+    }
+}
+
+fn scan_expr_for_calls(expr: &syn::Expr, fn_name: &str, edges: &mut Vec<ReentrancyEdge>) {
+    match expr {
+        syn::Expr::MethodCall(mc) => {
+            let method = mc.method.to_string();
+            if method == "invoke_contract" || method == "invoke_contract_check" {
+                // Try to extract target contract from arguments
+                let target = if !mc.args.is_empty() {
+                    quote::quote!(#(&mc.args[0])).to_string()
+                } else {
+                    "<unknown>".to_string()
+                };
+                
+                edges.push(ReentrancyEdge {
+                    caller_function: fn_name.to_string(),
+                    target_contract: target,
+                });
+            }
+            scan_expr_for_calls(&mc.receiver, fn_name, edges);
+            for arg in &mc.args {
+                scan_expr_for_calls(arg, fn_name, edges);
+            }
+        }
+        syn::Expr::Call(c) => {
+            if let syn::Expr::Path(p) = &*c.func {
+                if let Some(seg) = p.path.segments.last() {
+                    let ident = seg.ident.to_string();
+                    if ident == "invoke_contract" || ident == "invoke_contract_check" {
+                        let target = if !c.args.is_empty() {
+                            quote::quote!(#(&c.args[0])).to_string()
+                        } else {
+                            "<unknown>".to_string()
+                        };
+                        
+                        edges.push(ReentrancyEdge {
+                            caller_function: fn_name.to_string(),
+                            target_contract: target,
+                        });
+                    }
+                }
+            }
+            for arg in &c.args {
+                scan_expr_for_calls(arg, fn_name, edges);
+            }
+        }
+        syn::Expr::Block(b) => scan_block_for_calls(&b.block, fn_name, edges),
+        syn::Expr::If(i) => {
+            scan_expr_for_calls(&i.cond, fn_name, edges);
+            scan_block_for_calls(&i.then_branch, fn_name, edges);
+            if let Some((_, e)) = &i.else_branch {
+                scan_expr_for_calls(e, fn_name, edges);
+            }
+        }
+        syn::Expr::Match(m) => {
+            scan_expr_for_calls(&m.expr, fn_name, edges);
+            for arm in &m.arms {
+                scan_expr_for_calls(&arm.body, fn_name, edges);
+            }
+        }
+        _ => {}
+    }
+}
+

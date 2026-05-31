@@ -44,6 +44,8 @@ pub enum Commands {
     Storage(commands::storage::StorageArgs),
     /// Initialize Sanctifier in a new project
     Init(commands::init::InitArgs),
+    /// Install git hooks (pre-commit, pre-push) to run Sanctifier automatically
+    InstallHooks(commands::install_hooks::InstallHooksArgs),
     /// Show per-contract complexity metrics (cyclomatic complexity, nesting, LOC)
     Complexity(commands::complexity::ComplexityArgs),
     /// Generate a Graphviz DOT call graph of cross-contract calls (env.invoke_contract)
@@ -134,6 +136,9 @@ fn run() -> anyhow::Result<()> {
         Commands::Init(args) => {
             let path = Some(args.path.clone());
             commands::init::exec(args, path)?;
+        }
+        Commands::InstallHooks(args) => {
+            commands::install_hooks::exec(args)?;
         }
         Commands::Callgraph {
             path,

@@ -31,6 +31,15 @@ pub use rules::{Patch, Rule, RuleRegistry, RuleViolation, Severity};
 pub use sep41::{Sep41Issue, Sep41IssueKind, Sep41VerificationReport};
 #[cfg(feature = "smt")]
 pub use smt::SmtInvariantIssue;
+
+#[cfg(not(feature = "smt"))]
+#[derive(Debug, Serialize, Clone)]
+pub struct SmtInvariantIssue {
+    pub function_name: String,
+    pub description: String,
+    pub location: String,
+}
+
 pub use storage_collision::StorageCollisionIssue;
 
 // ── Panic Guard ───────────────────────────────────────────────────────────────

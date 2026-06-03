@@ -27,8 +27,8 @@
 //! * [`cache_metadata`] — return full cache metadata for offline-first consumers.
 
 use sanctifier_core::{
-    finding_codes, Analyzer, ArithmeticIssue, EventIssue, PanicIssue, SanctifyConfig,
-    SizeWarning, StorageCollisionIssue, UnhandledResultIssue, UnsafePattern,
+    finding_codes, Analyzer, ArithmeticIssue, EventIssue, PanicIssue, SanctifyConfig, SizeWarning,
+    StorageCollisionIssue, UnhandledResultIssue, UnsafePattern,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;

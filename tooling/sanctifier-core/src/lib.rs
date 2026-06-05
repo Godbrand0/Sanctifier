@@ -507,12 +507,11 @@ impl Analyzer {
                         self.check_expr(&init.expr, has_mutation, has_auth);
                     }
                 }
-                syn::Stmt::Macro(m) => {
+                syn::Stmt::Macro(m)
                     if m.mac.path.is_ident("require_auth")
-                        || m.mac.path.is_ident("require_auth_for_args")
-                    {
-                        *has_auth = true;
-                    }
+                        || m.mac.path.is_ident("require_auth_for_args") =>
+                {
+                    *has_auth = true;
                 }
                 _ => {}
             }
@@ -634,19 +633,17 @@ impl Analyzer {
                         }
                     }
                 }
-                Item::Enum(e) => {
-                    if has_contracttype(&e.attrs) {
-                        let size = self.estimate_enum_size(e);
-                        if let Some(level) =
-                            classify_size(size, limit, approaching, strict, strict_threshold)
-                        {
-                            warnings.push(SizeWarning {
-                                struct_name: e.ident.to_string(),
-                                estimated_size: size,
-                                limit,
-                                level,
-                            });
-                        }
+                Item::Enum(e) if has_contracttype(&e.attrs) => {
+                    let size = self.estimate_enum_size(e);
+                    if let Some(level) =
+                        classify_size(size, limit, approaching, strict, strict_threshold)
+                    {
+                        warnings.push(SizeWarning {
+                            struct_name: e.ident.to_string(),
+                            estimated_size: size,
+                            limit,
+                            level,
+                        });
                     }
                 }
                 _ => {}
@@ -1796,10 +1793,8 @@ fn block_has_early_exit(block: &syn::Block) -> bool {
                     return true;
                 }
             }
-            syn::Stmt::Macro(m) => {
-                if m.mac.path.is_ident("panic") {
-                    return true;
-                }
+            syn::Stmt::Macro(m) if m.mac.path.is_ident("panic") => {
+                return true;
             }
             _ => {}
         }

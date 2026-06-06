@@ -27,3 +27,17 @@ pub mod verify;
 pub mod watch;
 pub mod webhook;
 pub mod workspace;
+
+/// Shared test-only synchronization for `std::env::set_current_dir`, which is
+/// process-wide. Any test in this crate that changes the current directory
+/// must hold this lock for its entire duration (including restoring the
+/// original directory), or concurrently-running tests can race: one test may
+/// capture another test's temp directory as its "original" CWD just before
+/// that temp directory is dropped and deleted, causing `set_current_dir` to
+/// fail with `NotFound` and poisoning any lock held at the time.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::Mutex;
+
+    pub(crate) static CWD_LOCK: Mutex<()> = Mutex::new(());
+}

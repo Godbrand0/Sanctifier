@@ -218,12 +218,9 @@ pub fn exec(args: InstallHooksArgs) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::CWD_LOCK;
     use std::fs;
-    use std::sync::Mutex;
     use tempfile::TempDir;
-
-    // Tests that call set_current_dir must hold this lock — the call is process-wide.
-    static CWD_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_find_git_dir_in_current_directory() {

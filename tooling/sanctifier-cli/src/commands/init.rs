@@ -183,6 +183,7 @@ pub fn exec(args: InitArgs, path: Option<PathBuf>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::CWD_LOCK;
     use std::fs;
     use tempfile::TempDir;
 
@@ -369,6 +370,7 @@ mod tests {
         };
 
         // Change to temp directory
+        let _guard = CWD_LOCK.lock().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(temp_dir.path()).unwrap();
 

@@ -117,7 +117,7 @@ jobs:
       - name: Code coverage (Linux only)
         if: runner.os == 'Linux'
         run: |
-          cargo install cargo-tarpaulin --locked --quiet
+          command -v cargo-tarpaulin >/dev/null || cargo install cargo-tarpaulin --locked --quiet
           cargo tarpaulin --workspace --out Xml --output-dir coverage/
 
       - name: Upload coverage to Codecov (Linux only)

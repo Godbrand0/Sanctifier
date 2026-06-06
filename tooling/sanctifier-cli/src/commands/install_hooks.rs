@@ -378,9 +378,14 @@ mod tests {
         std::env::set_current_dir(original_dir).unwrap();
 
         assert!(result.is_ok());
+        let hooks_dir = result.unwrap();
         assert_eq!(
-            result.unwrap(),
-            git_dir.canonicalize().unwrap().join("hooks")
+            hooks_dir.file_name().and_then(|n| n.to_str()),
+            Some("hooks")
+        );
+        assert_eq!(
+            hooks_dir.parent().unwrap().canonicalize().unwrap(),
+            git_dir.canonicalize().unwrap()
         );
     }
 

@@ -667,7 +667,6 @@ fn test_analyze_json_includes_call_graph_edges() {
 /// Verifies that `sanctifier analyze --format json` output conforms to the
 /// published JSON Schema at `schemas/analysis-output.json`.
 #[test]
-#[ignore = "Schema validation temporarily disabled - output format needs to be updated to match schema"]
 fn test_json_output_validates_against_schema() {
     // Locate the schema relative to the workspace root (two levels up from
     // this package's Cargo.toml directory).
@@ -999,6 +998,209 @@ fn test_telemetry_flag_parses() {
         .success();
 }
 
+#[test]
+fn test_analyze_invalid_project_returns_2() {
+    let mut cmd = Command::cargo_bin("sanctifier").unwrap();
+    cmd.arg("analyze")
+        .arg("does-not-exist")
+        .arg("--exit-code")
+        .env_remove("RUST_LOG")
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn test_init_creates_cargo_toml_and_lib_rs() {
+    let temp_dir = tempdir().unwrap();
+    let project_path = temp_dir.path().join("test-contract");
+
+    let mut cmd = Command::cargo_bin("sanctifier").unwrap();
+    cmd.arg("init").arg(&project_path).assert().success();
+
+    assert!(
+        project_path.join("Cargo.toml").exists(),
+        "init should create Cargo.toml"
+    );
+    assert!(
+        project_path.join("src/lib.rs").exists(),
+        "init should create src/lib.rs"
+    );
+}
+
+#[test]
+fn test_complexity_shows_table_in_stdout() {
+    let mut cmd = Command::cargo_bin("sanctifier").unwrap();
+    let fixture_path = env::current_dir()
+        .unwrap()
+        .join("tests/fixtures/valid_contract.rs");
+
+    cmd.arg("complexity")
+        .arg(fixture_path)
+        .env_remove("RUST_LOG")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Function"))
+        .stdout(predicates::str::contains("Complexity"));
+}
+
+// ── Command surface & help UX tests (#516) ────────────────────────────────────
+
+#[test]
+fn test_no_subcommand_shows_usage() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("Usage:"));
+}
+
+#[test]
+fn test_unknown_subcommand_exits_nonzero() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("not-a-real-command")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_version_flag() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("sanctifier"));
+}
+
+#[test]
+fn test_analyze_help_mentions_format_flag() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["analyze", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("--format"));
+}
+
+#[test]
+fn test_diff_help_is_accessible() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["diff", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("baseline"));
+}
+
+#[test]
+fn test_report_help_mentions_output_flag() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["report", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("--output"));
+}
+
+#[test]
+fn test_gas_help_is_accessible() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["gas", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("gas"));
+}
+
+#[test]
+fn test_storage_help_is_accessible() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["storage", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("storage"));
+}
+
+#[test]
+fn test_init_help_is_accessible() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["init", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Initialize"));
+}
+
+#[test]
+fn test_complexity_help_is_accessible() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["complexity", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("complexity"));
+}
+
+#[test]
+fn test_fix_help_is_accessible() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["fix", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("patch"));
+}
+
+#[test]
+fn test_completions_bash_outputs_script() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("sanctifier"));
+}
+
+#[test]
+fn test_completions_zsh_outputs_script() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["completions", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("sanctifier"));
+}
+
+#[test]
+fn test_suppress_help_is_accessible() {
+    Command::cargo_bin("sanctifier")
+        .unwrap()
+        .args(["suppress", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Suppress"));
+}
+
+#[test]
+fn test_top_level_help_lists_all_core_subcommands() {
+    let out = Command::cargo_bin("sanctifier")
+        .unwrap()
+        .arg("--help")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let text = String::from_utf8(out).unwrap();
+    for cmd in &["analyze", "report", "gas", "storage", "init", "complexity", "fix"] {
+        assert!(
+            text.contains(cmd),
+            "top-level --help should list '{cmd}' but didn't"
+        );
+    }
 // ── #517: Config file resolution precedence ───────────────────────────────────
 
 /// The config file in the same directory as the analysed file is used (nearest wins).

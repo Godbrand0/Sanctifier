@@ -170,11 +170,11 @@ pub(crate) fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
         return stream_ndjson(&args);
     }
 
-    let path = &args.path;
+    let path = normalize_cli_path(args.path.clone());
     if !path.exists() {
         anyhow::bail!("path does not exist: {}", path.display());
     }
-    if !is_soroban_project(path) {
+    if !is_soroban_project(&path) {
         eprintln!("No Soroban project found at {:?}", path);
         return Ok(false);
     }
@@ -680,4 +680,71 @@ fn sha256_hex(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+// ── Path normalization ────────────────────────────────────────────────────────
+
+/// Normalize a CLI path argument for the current OS.
+///
+/// On non-Windows platforms, backslash separators that users copy from Windows
+/// paths (e.g. `tests\fixtures\contract.rs`) are silently converted to POSIX
+/// forward-slash paths so that the rest of the pipeline can handle them
+/// uniformly.  No conversion is needed on Windows because the OS accepts both
+/// separator styles natively.
+///
+/// # Platform behaviour
+/// | Platform | Input | Output |
+/// |----------|-------|--------|
+/// | Linux/macOS | `foo\bar\baz.rs` | `foo/bar/baz.rs` |
+/// | Linux/macOS | `foo/bar/baz.rs` | `foo/bar/baz.rs` (unchanged) |
+/// | Windows | any | unchanged (OS handles both) |
+#[cfg(not(windows))]
+pub(crate) fn normalize_cli_path(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    if s.contains('\\') {
+        PathBuf::from(s.replace('\\', "/"))
+    } else {
+        p
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn normalize_cli_path(p: PathBuf) -> PathBuf {
+    p
+}
+
+#[cfg(test)]
+mod path_normalization_tests {
+    use super::normalize_cli_path;
+    use std::path::PathBuf;
+
+    #[test]
+    #[cfg(not(windows))]
+    fn unix_converts_backslashes_to_forward_slashes() {
+        let result = normalize_cli_path(PathBuf::from("tests\\fixtures\\valid_contract.rs"));
+        assert_eq!(result, PathBuf::from("tests/fixtures/valid_contract.rs"));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn unix_passthrough_when_no_backslashes() {
+        let p = PathBuf::from("tests/fixtures/valid_contract.rs");
+        let result = normalize_cli_path(p.clone());
+        assert_eq!(result, p);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn unix_handles_mixed_separators() {
+        let result = normalize_cli_path(PathBuf::from("tests\\fixtures/contract.rs"));
+        assert_eq!(result, PathBuf::from("tests/fixtures/contract.rs"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_path_is_returned_unchanged() {
+        let p = PathBuf::from("tests\\fixtures\\valid_contract.rs");
+        let result = normalize_cli_path(p.clone());
+        assert_eq!(result, p);
+    }
 }

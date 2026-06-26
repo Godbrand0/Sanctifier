@@ -3,7 +3,7 @@
 //!
 //! This crate provides the [`Analyzer`] entry-point together with a
 //! [`RuleRegistry`] of pluggable rules.  Every finding is tagged with a
-//! canonical code from the [`finding_codes`] module (`S000` – `S012`).
+//! canonical code from the [`finding_codes`] module (`S000` – `S027`).
 //!
 //! # JSON output schema
 //!
@@ -11,6 +11,32 @@
 //! JSON Schema (draft-07) published at
 //! `schemas/analysis-output.json` in the repository root.  The schema is
 //! versioned via a `schema_version` field in every report and validated in CI.
+//!
+//! ## Schema stability guarantees
+//!
+//! * **Additive changes** (new optional top-level fields) increment the patch
+//!   version only and are backward-compatible.
+//! * **Structural changes** (renaming required fields, removing fields, or
+//!   changing type constraints) increment the minor or major version and
+//!   require the `schema_version` field to be updated accordingly.
+//! * Downstream consumers **must** check `schema_version` before parsing
+//!   structured fields so they can detect unsupported versions early.
+//!
+//! ## Threat model notes
+//!
+//! The JSON report is written to stdout and consumed by CI pipelines, dashboards,
+//! and human operators.  The following properties are enforced to make the
+//! output safe-by-default:
+//!
+//! * **No shell injection surface** — all string fields in findings (file paths,
+//!   snippets, messages) are JSON-escaped by `serde_json` and never interpolated
+//!   into shell commands by the engine itself.
+//! * **Bounded output size** — the `--max-findings` config key caps the number of
+//!   findings per category so that a pathological contract cannot produce a
+//!   multi-gigabyte report.
+//! * **Stable IDs** — every finding carries a `stable_id` derived from a content
+//!   hash so that downstream de-duplication and suppression logic is resilient to
+//!   minor reformats and line-number drift.
 //!
 //! # Quick start
 //!

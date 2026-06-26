@@ -158,18 +158,11 @@ pub fn exec(args: AnalyzeArgs) -> anyhow::Result<()> {
 pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
     let path_raw = args.path.clone();
 
-    #[cfg(not(windows))]
-    let path = {
-        let s = path_raw.to_string_lossy();
-        if s.contains('\\') {
-            PathBuf::from(s.replace('\\', "/"))
-        } else {
-            path_raw
-        }
-    };
-
-    #[cfg(windows)]
-    let path = path_raw;
+    // On non-Windows platforms, accept Windows-style backslash paths (e.g. from
+    // cross-platform CI scripts or copy-pasted Windows paths) and convert them
+    // to POSIX forward-slash paths so the rest of the pipeline can use them
+    // uniformly.  On Windows the OS already handles both separators natively.
+    let path = normalize_cli_path(path_raw);
 
     let is_json = args.format == "json";
     let timeout_secs = args.timeout;
@@ -466,8 +459,40 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
     }
 
     if is_json {
+        let cached_files = cached_counter.load(Ordering::Relaxed);
+
+        // Flatten upgrade report sub-findings into individual S010 entries.
+        let upgrade_risks: Vec<serde_json::Value> = upgrade_reports
+            .iter()
+            .flat_map(|r| r.findings.iter())
+            .map(|f| {
+                serde_json::json!({
+                    "code": finding_codes::UPGRADE_RISK,
+                    "category": f.category,
+                    "function_name": f.function_name,
+                    "location": f.location,
+                    "message": f.message,
+                    "suggestion": f.suggestion,
+                })
+            })
+            .collect();
+
+        // Convert timed-out file paths to structured S000 finding objects.
+        let timeout_findings: Vec<serde_json::Value> = timed_out_files
+            .iter()
+            .map(|f| {
+                serde_json::json!({
+                    "code": finding_codes::ANALYSIS_TIMEOUT,
+                    "file": f,
+                    "message": format!("Analysis timed out after {}s", timeout_secs),
+                })
+            })
+            .collect();
+
         let report = serde_json::json!({
-            "schema_version": "1.0.0",
+            // Schema version — increment when the output shape changes.
+            "schema_version": "1.1.0",
+            // ── Raw arrays (backward compat; top-level additionalProperties is open) ──
             "storage_collisions": collisions,
             "ledger_size_warnings": size_warnings,
             "unsafe_patterns": unsafe_patterns,
@@ -480,33 +505,35 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
             "unhandled_results": unhandled_results,
             "upgrade_reports": upgrade_reports,
             "smt_issues": smt_issues,
-            "sep41_checked_contracts": sep41_checked_contracts,
             "sep41_issues": sep41_issues,
             "contractimport_issues": contractimport_issues,
             "vulnerability_db_matches": vuln_matches,
             "vulnerability_db_version": vuln_db.version,
             "timed_out_files": timed_out_files,
+            "sep41_checked_contracts": sep41_checked_contracts,
+            // Extra fields not allowed inside metadata (schema: additionalProperties: false).
+            "duration_ms": duration_ms,
+            "profile": args.profile.map(|p| p.as_str()),
+            // ── Schema-required metadata (no extra keys — additionalProperties: false) ──
             "metadata": {
                 "version": env!("CARGO_PKG_VERSION"),
                 "timestamp": timestamp,
-                "duration_ms": duration_ms,
                 "project_path": path.display().to_string(),
                 "format": "sanctifier-ci-v1",
                 "timeout_secs": timeout_secs,
-                "cached_files": cached_counter.load(Ordering::Relaxed),
+                "cached_files": cached_files,
                 "total_files": total_files,
-                "profile": args.profile.map(|p| p.as_str()),
             },
             "error_codes": finding_codes::all_finding_codes(),
+            // ── Schema-required summary (no extra keys — additionalProperties: false) ──
             "summary": {
                 "total_findings": total_findings,
-                "cached_files": cached_counter.load(Ordering::Relaxed),
-                "reanalysed_files": total_files - cached_counter.load(Ordering::Relaxed),
+                "cached_files": cached_files,
+                "reanalysed_files": total_files - cached_files,
                 "storage_collisions": collisions.len(),
                 "auth_gaps": auth_gaps.len(),
                 "panic_issues": panic_issues.len(),
                 "arithmetic_issues": arithmetic_issues.len(),
-                "truncation_bounds_issues": truncation_bounds_issues.len(),
                 "size_warnings": size_warnings.len(),
                 "unsafe_patterns": unsafe_patterns.len(),
                 "custom_rule_matches": custom_matches.len(),
@@ -514,10 +541,90 @@ pub fn run_analysis(args: AnalyzeArgs) -> anyhow::Result<bool> {
                 "unhandled_results": unhandled_results.len(),
                 "smt_issues": smt_issues.len(),
                 "sep41_issues": sep41_issues.len(),
-                "contractimport_issues": contractimport_issues.len(),
                 "timed_out_files": timed_out_files.len(),
                 "has_critical": has_critical,
                 "has_high": has_high,
+            },
+            // ── Structured finding lists, each tagged with a canonical code ──
+            "findings": {
+                "storage_collisions": collisions.iter().map(|c| serde_json::json!({
+                    "code": finding_codes::STORAGE_COLLISION,
+                    "key_value": c.key_value,
+                    "key_type": c.key_type,
+                    "location": c.location,
+                    "message": c.message,
+                })).collect::<Vec<_>>(),
+                "ledger_size_warnings": size_warnings.iter().map(|w| serde_json::json!({
+                    "code": finding_codes::LEDGER_SIZE_RISK,
+                    "struct_name": w.struct_name,
+                    "estimated_size": w.estimated_size,
+                    "limit": w.limit,
+                    "level": w.level,
+                })).collect::<Vec<_>>(),
+                "unsafe_patterns": unsafe_patterns.iter().map(|u| serde_json::json!({
+                    "code": finding_codes::UNSAFE_PATTERN,
+                    "pattern_type": u.pattern_type,
+                    "line": u.line,
+                    "snippet": u.snippet,
+                })).collect::<Vec<_>>(),
+                // Schema FindingAuthGap uses "function" (not "function_name").
+                "auth_gaps": auth_gaps.iter().map(|a| serde_json::json!({
+                    "code": finding_codes::AUTH_GAP,
+                    "function": a.function_name,
+                })).collect::<Vec<_>>(),
+                "panic_issues": panic_issues.iter().map(|p| serde_json::json!({
+                    "code": finding_codes::PANIC_USAGE,
+                    "function_name": p.function_name,
+                    "issue_type": p.issue_type,
+                    "location": p.location,
+                })).collect::<Vec<_>>(),
+                "arithmetic_issues": arithmetic_issues.iter().map(|a| serde_json::json!({
+                    "code": finding_codes::ARITHMETIC_OVERFLOW,
+                    "function_name": a.function_name,
+                    "operation": a.operation,
+                    "suggestion": a.suggestion,
+                    "location": a.location,
+                })).collect::<Vec<_>>(),
+                // Schema FindingCustomRule.severity is "info" | "warning" | "error".
+                "custom_rules": custom_matches.iter().map(|m| serde_json::json!({
+                    "code": finding_codes::CUSTOM_RULE_MATCH,
+                    "rule_name": m.rule_name,
+                    "line": m.line,
+                    "snippet": m.snippet,
+                    "severity": severity_schema_str(&m.severity),
+                })).collect::<Vec<_>>(),
+                // Schema FindingEventIssue does not include function_name.
+                "event_issues": event_issues.iter().map(|e| serde_json::json!({
+                    "code": finding_codes::EVENT_INCONSISTENCY,
+                    "event_name": e.event_name,
+                    "issue_type": e.issue_type,
+                    "location": e.location,
+                    "message": e.message,
+                })).collect::<Vec<_>>(),
+                "unhandled_results": unhandled_results.iter().map(|u| serde_json::json!({
+                    "code": finding_codes::UNHANDLED_RESULT,
+                    "function_name": u.function_name,
+                    "call_expression": u.call_expression,
+                    "location": u.location,
+                    "message": u.message,
+                })).collect::<Vec<_>>(),
+                "upgrade_risks": upgrade_risks,
+                "smt_issues": smt_issues.iter().map(|s| serde_json::json!({
+                    "code": finding_codes::SMT_INVARIANT_VIOLATION,
+                    "function_name": s.function_name,
+                    "description": s.description,
+                    "location": s.location,
+                })).collect::<Vec<_>>(),
+                "sep41_issues": sep41_issues.iter().map(|s| serde_json::json!({
+                    "code": finding_codes::SEP41_INTERFACE_DEVIATION,
+                    "function_name": s.function_name,
+                    "kind": s.kind,
+                    "location": s.location,
+                    "message": s.message,
+                    "expected_signature": s.expected_signature,
+                    "actual_signature": s.actual_signature,
+                })).collect::<Vec<_>>(),
+                "timeouts": timeout_findings,
             },
         });
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -1109,5 +1216,83 @@ impl AnalysisCache {
 
     fn store(&mut self, file_path: String, hash: String, result: FileAnalysisResult) {
         self.entries.insert(file_path, CacheEntry { hash, result });
+    }
+}
+
+// ── Path normalization ────────────────────────────────────────────────────────
+
+/// Normalize a CLI path argument for the current OS.
+///
+/// On non-Windows platforms, backslash separators that users copy from Windows
+/// paths (e.g. `tests\fixtures\contract.rs`) are silently converted to POSIX
+/// forward-slash paths so that the rest of the pipeline can handle them
+/// uniformly.  No conversion is needed on Windows because the OS accepts both
+/// separator styles natively.
+///
+/// # Platform behaviour
+/// | Platform | Input | Output |
+/// |----------|-------|--------|
+/// | Linux/macOS | `foo\bar\baz.rs` | `foo/bar/baz.rs` |
+/// | Linux/macOS | `foo/bar/baz.rs` | `foo/bar/baz.rs` (unchanged) |
+/// | Windows | any | unchanged (OS handles both) |
+#[cfg(not(windows))]
+pub(crate) fn normalize_cli_path(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    if s.contains('\\') {
+        PathBuf::from(s.replace('\\', "/"))
+    } else {
+        p
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn normalize_cli_path(p: PathBuf) -> PathBuf {
+    p
+}
+
+/// Map a `FindingSeverity` value to the three-level schema string used in the
+/// `findings.custom_rules[].severity` field ("info" | "warning" | "error").
+fn severity_schema_str(s: &sanctifier_core::finding_codes::FindingSeverity) -> &'static str {
+    use sanctifier_core::finding_codes::FindingSeverity;
+    match s {
+        FindingSeverity::Critical | FindingSeverity::High => "error",
+        FindingSeverity::Medium | FindingSeverity::Low => "warning",
+        FindingSeverity::Info => "info",
+    }
+}
+
+#[cfg(test)]
+mod path_normalization_tests {
+    use super::normalize_cli_path;
+    use std::path::PathBuf;
+
+    #[test]
+    #[cfg(not(windows))]
+    fn unix_converts_backslashes_to_forward_slashes() {
+        let result = normalize_cli_path(PathBuf::from("tests\\fixtures\\valid_contract.rs"));
+        assert_eq!(result, PathBuf::from("tests/fixtures/valid_contract.rs"));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn unix_passthrough_when_no_backslashes() {
+        let p = PathBuf::from("tests/fixtures/valid_contract.rs");
+        let result = normalize_cli_path(p.clone());
+        assert_eq!(result, p);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn unix_handles_mixed_separators() {
+        let result = normalize_cli_path(PathBuf::from("tests\\fixtures/contract.rs"));
+        assert_eq!(result, PathBuf::from("tests/fixtures/contract.rs"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_path_is_returned_unchanged() {
+        let p = PathBuf::from("tests\\fixtures\\valid_contract.rs");
+        let result = normalize_cli_path(p.clone());
+        assert_eq!(result, p);
     }
 }

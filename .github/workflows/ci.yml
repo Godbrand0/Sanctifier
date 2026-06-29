@@ -214,8 +214,9 @@ jobs:
 
   frontend-e2e:
     name: Frontend E2E Tests (Playwright)
-    if: false  # disabled: cdn.playwright.dev download too slow on GH runners (~16 min for 170 MB)
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.40.0-jammy
     timeout-minutes: 20
 
     steps:
@@ -237,32 +238,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: cd frontend && npm install
-
-      - name: Install Chromium runtime dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
-            libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-            libpango-1.0-0 libcairo2 \
-            libasound2t64 2>/dev/null || \
-          sudo apt-get install -y --no-install-recommends \
-            libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
-            libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-            libpango-1.0-0 libcairo2 libasound2
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-1.59.1
-
-      - name: Install Playwright chromium browser
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: cd frontend && npx playwright install chromium
 
       - name: Run e2e tests
         run: cd frontend && npm run test:e2e
@@ -279,8 +254,9 @@ jobs:
 
   frontend-schema-e2e:
     name: Frontend Schema Rendering E2E
-    if: false  # disabled: cdn.playwright.dev download too slow on GH runners (~16 min for 170 MB)
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.40.0-jammy
     timeout-minutes: 20
 
     steps:
@@ -302,32 +278,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: cd frontend && npm install
-
-      - name: Install Chromium runtime dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
-            libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-            libpango-1.0-0 libcairo2 \
-            libasound2t64 2>/dev/null || \
-          sudo apt-get install -y --no-install-recommends \
-            libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
-            libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
-            libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-            libpango-1.0-0 libcairo2 libasound2
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-1.59.1
-
-      - name: Install Playwright chromium browser
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: cd frontend && npx playwright install chromium
 
       - name: Run schema rendering e2e suite
         run: cd frontend && npm run test:e2e:schema

@@ -218,6 +218,8 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.40.0-jammy
     timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-jammy
 
     steps:
       - name: Checkout repository
@@ -238,6 +240,7 @@ jobs:
 
       - name: Install frontend dependencies
         run: cd frontend && npm install
+
 
       - name: Run e2e tests
         run: cd frontend && npm run test:e2e
@@ -258,6 +261,8 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.40.0-jammy
     timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-jammy
 
     steps:
       - name: Checkout repository
@@ -278,6 +283,7 @@ jobs:
 
       - name: Install frontend dependencies
         run: cd frontend && npm install
+
 
       - name: Run schema rendering e2e suite
         run: cd frontend && npm run test:e2e:schema
